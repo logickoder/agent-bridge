@@ -36,13 +36,23 @@ export const Peer = z.object({
 export const Request = z.discriminatedUnion('op', [
   z.object({
     op: z.literal('listen'),
-    as: PeerName,
+    /** Omit to listen on whatever name the session holds, waiting for `claim` if it holds none yet. */
+    as: PeerName.optional(),
     kind: PeerKind,
     session: z.string().min(1).optional(),
     stream: z.boolean(),
-  }),
-  /** Get the session's auto-named peer: `<folder>-<kind>`, or the lowest free `-<n>`. */
-  z.object({ op: z.literal('claim'), folder: z.string().min(1), kind: PeerKind, session: z.string().min(1) }),
+  }).refine(r => r.as !== undefined || r.session !== undefined, 'listen needs `as` or `session`.'),
+  /**
+   * Bind a name to a session. With `folder`: the session's auto name, `<folder>-<kind>` or the lowest free
+   * `-<n>`. With `name`: that name, taking it over unless it is another session's auto name.
+   */
+  z.object({
+    op: z.literal('claim'),
+    folder: z.string().min(1).optional(),
+    name: PeerName.optional(),
+    kind: PeerKind,
+    session: z.string().min(1),
+  }).refine(r => (r.folder === undefined) !== (r.name === undefined), 'claim needs exactly one of `folder` or `name`.'),
   z.object({ op: z.literal('send'), from: PeerName, to: PeerName, text: z.string().trim().min(1) }),
   z.object({ op: z.literal('ack'), as: PeerName, id: z.string() }),
   z.object({ op: z.literal('drain'), session: z.string().min(1) }),

@@ -79,11 +79,17 @@ export async function stopDaemon(): Promise<void> {
   }
 }
 
-/** The peer name for an identity: the chosen one, or the auto name the daemon assigns this session. */
+/**
+ * Binds the session's name in the daemon and returns it: the chosen name (renaming the session's current
+ * one if it has one), or the auto name. Without a session, a chosen name is returned unbound.
+ */
 export async function resolveName(identity: Identity, kind: PeerKind, session: string | undefined): Promise<string> {
-  if ('name' in identity) return identity.name
-  if (!session) throw new Error('no session id. An auto name needs one. Run this from inside the agent, or pass a name.')
-  return (await request({ op: 'claim', folder: identity.folder, kind, session }, 'claimed')).name
+  if (!session) {
+    if ('name' in identity) return identity.name
+    throw new Error('no session id. An auto name needs one. Run this from inside the agent, or pass a name.')
+  }
+  const target = 'name' in identity ? { name: identity.name } : { folder: identity.folder }
+  return (await request({ op: 'claim', ...target, kind, session }, 'claimed')).name
 }
 
 /** One request, one reply. Rejects on an `error` reply. */
@@ -174,7 +180,8 @@ export function holdListen(
           () => {
             // A one-shot listener is done after its message; the daemon closes the socket.
             if (!req.stream) stopped = true
-            writeLine(s, { op: 'ack', as: req.as, id: reply.msg.id })
+            // `to`, not req.as: a listener by session has no `as`, and its name can change by rename.
+            writeLine(s, { op: 'ack', as: reply.msg.to, id: reply.msg.id })
           },
           (err: unknown) => {
             listener.onError(toError(err))

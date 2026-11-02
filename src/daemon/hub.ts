@@ -62,6 +62,8 @@ export class Hub {
   private readonly waiters = new Map<string, Waiter[]>()
   private readonly inflight = new Map<string, { id: string; waiter: Waiter }>()
   private readonly byConn = new Map<Conn, Waiter>()
+  /** Listeners that asked by session before the session held a name. Attached on claim. */
+  private readonly pending = new Map<Conn, ListenRequest>()
   /** lastSeen as last written to disk, per peer. Throttles touch() against what is stored, not in memory. */
   private readonly savedSeen = new Map<string, number>()
 
@@ -78,9 +80,10 @@ export class Hub {
       case 'listen':
         return this.listen(req, conn)
       case 'claim': {
-        const name = this.claim(req)
-        if (name) return this.reply(conn, { type: 'claimed', name })
-        return this.fail(conn, `no free name left for ${autoBase(req.folder, req.kind)}. Every suffix up to -999 is taken. Pass a name instead.`)
+        const r = this.claim(req)
+        if ('error' in r) return this.fail(conn, r.error)
+        this.attachPending(req.session)
+        return this.reply(conn, { type: 'claimed', name: r.name })
       }
       case 'send':
         return this.send(req, conn)
@@ -101,6 +104,7 @@ export class Hub {
   }
 
   disconnect(conn: Conn): void {
+    this.pending.delete(conn)
     const waiter = this.byConn.get(conn)
     if (!waiter) return
     this.removeWaiter(waiter)
@@ -116,24 +120,32 @@ export class Hub {
   }
 
   private listen(req: ListenRequest, conn: Conn): void {
-    const existing = this.peers.get(req.as)
+    const as = req.as ?? this.nameOf(req.session, req.kind)
+    if (!as) {
+      this.pending.set(conn, req)
+      return
+    }
+    const existing = this.peers.get(as)
     if (existing && existing.kind !== req.kind) {
-      return this.fail(conn, `"${req.as}" is taken by a ${existing.kind} peer. Pick another name.`)
+      return this.fail(conn, `"${as}" is taken by a ${existing.kind} peer. Pick another name.`)
     }
     const session = req.session ?? null
     if (existing?.auto && existing.session && session !== existing.session) {
       return this.fail(
         conn,
-        `"${req.as}" is an auto name held by another session. Run \`agent-bridge join\` for this session's own name, or \`agent-bridge leave ${req.as}\` first.`,
+        `"${as}" is an auto name held by another session. Run \`agent-bridge join\` for this session's own name, or \`agent-bridge leave ${as}\` first.`,
       )
     }
-    const peer = existing ?? this.addPeer(req.as, req.kind)
+    const peer = existing ?? this.addPeer(as, req.kind)
     if (session && session !== peer.session) this.bind(peer, session)
     if (peer.session && session !== peer.session) {
       return this.fail(
         conn,
         `"${peer.name}" is bound to session ${peer.session} and this listener has no session id. Run it from inside the agent, or run \`agent-bridge leave ${peer.name}\`.`,
       )
+    }
+    if (req.stream && session && this.waitersOf(peer.name).some(w => w.stream && w.session === session && !w.conn.closed)) {
+      return this.fail(conn, `this session already receives "${peer.name}" through another stream listener. Nothing to do.`)
     }
     this.touch(peer)
     const waiter: Waiter = { name: peer.name, conn, stream: req.stream, session }
@@ -142,26 +154,109 @@ export class Hub {
     this.pump(peer.name)
   }
 
+  private nameOf(session: string | undefined, kind: PeerKind): string | undefined {
+    return session === undefined ? undefined : this.boundTo(session).find(p => p.kind === kind)?.name
+  }
+
+  private attachPending(session: string): void {
+    for (const [conn, req] of [...this.pending]) {
+      if (req.session !== session) continue
+      this.pending.delete(conn)
+      this.listen(req, conn)
+    }
+  }
+
+  private claim(req: ClaimRequest): { name: string } | { error: string } {
+    if (req.name !== undefined) return this.claimNamed(req.name, req.kind, req.session)
+    const folder = req.folder ?? ''
+    const name = this.claimAuto(folder, req.kind, req.session)
+    if (name) return { name }
+    return { error: `no free name left for ${autoBase(folder, req.kind)}. Every suffix up to -999 is taken. Pass a name instead.` }
+  }
+
+  /** An explicit name: bind it to the session, taking it over, unless it is another kind's or another session's auto name. */
+  private claimNamed(name: string, kind: PeerKind, session: string): { name: string } | { error: string } {
+    const current = this.nameOf(session, kind)
+    // A session that already holds a name is renaming: in place when the new name is free.
+    if (current && current !== name && !this.peers.has(name)) {
+      this.rename(current, name)
+      return { name }
+    }
+    const existing = this.peers.get(name)
+    if (existing && existing.kind !== kind) return { error: `"${name}" is taken by a ${existing.kind} peer. Pick another name.` }
+    if (existing?.auto && existing.session && existing.session !== session) {
+      return { error: `"${name}" is an auto name held by another session. Pick another name.` }
+    }
+    const peer = existing ?? this.addPeer(name, kind)
+    if (peer.session !== session) this.bind(peer, session)
+    if (current && current !== name) this.moveSession(current, name, session)
+    this.touch(peer)
+    return { name }
+  }
+
+  /** Renames a peer, carrying its queue, in-flight message and listeners. The name is explicit from now on. */
+  private rename(from: string, to: string): void {
+    const peer = this.peers.get(from)
+    if (!peer) return
+    this.peers.delete(from)
+    peer.name = to
+    peer.auto = false
+    this.peers.set(to, peer)
+    const q = this.queue(from).map(m => ({ ...m, to }))
+    this.queues.delete(from)
+    this.queues.set(to, q)
+    const ws = this.waitersOf(from)
+    this.waiters.delete(from)
+    for (const w of ws) w.name = to
+    this.waiters.set(to, ws)
+    const held = this.inflight.get(from)
+    this.inflight.delete(from)
+    if (held) this.inflight.set(to, held)
+    this.savedSeen.delete(from)
+    this.deps.store.dropQueue(from)
+    this.deps.store.saveQueue(to, q)
+    this.savePeers()
+  }
+
+  /** Moves a session's listeners from one name to another and releases the old name. */
+  private moveSession(from: string, to: string, session: string): void {
+    for (const w of [...this.waitersOf(from)]) {
+      if (w.session !== session) continue
+      this.removeWaiter(w)
+      w.name = to
+      this.waitersOf(to).push(w)
+      this.byConn.set(w.conn, w)
+    }
+    const old = this.peers.get(from)
+    if (old?.session === session) {
+      old.lastSession = session
+      old.session = null
+      this.savePeers()
+    }
+    this.pump(from)
+    this.pump(to)
+  }
+
   /** The session's auto name, its name from before a leave, or a new one. Undefined when none is free. */
-  private claim(req: ClaimRequest): string | undefined {
+  private claimAuto(folder: string, kind: PeerKind, session: string): string | undefined {
     this.prune()
-    const base = autoBase(req.folder, req.kind)
-    const mine = (p: Peer): boolean => p.kind === req.kind && inFamily(p.name, base)
-    const held = this.boundTo(req.session).find(mine)
+    const base = autoBase(folder, kind)
+    const mine = (p: Peer): boolean => p.kind === kind && inFamily(p.name, base)
+    const held = this.boundTo(session).find(mine)
     if (held) {
       this.touch(held)
       return held.name
     }
-    const left = [...this.peers.values()].find(p => mine(p) && p.session === null && p.lastSession === req.session)
+    const left = [...this.peers.values()].find(p => mine(p) && p.session === null && p.lastSession === session)
     if (left) {
-      left.session = req.session
+      left.session = session
       this.touch(left)
       this.savePeers()
       return left.name
     }
     const name = nextFree(base, new Set(this.peers.keys()))
     if (!name) return undefined
-    const peer = this.addPeer(name, req.kind, req.session)
+    const peer = this.addPeer(name, kind, session)
     peer.auto = true
     this.savePeers()
     return name

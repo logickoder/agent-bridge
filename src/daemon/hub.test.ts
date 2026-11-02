@@ -398,3 +398,95 @@ describe('review fixes', () => {
     })
   })
 })
+
+describe('listen by session', () => {
+  const bySession = (session: string, kind: 'claude' | 'agy' = 'claude', stream = true) =>
+    ({ op: 'listen', kind, session, stream }) as const
+
+  it('attaches to the name already bound to the session', () => {
+    const { claim, call, send } = setup()
+    claim('/x/b', 'claude', 'c1')
+    const l = call(bySession('c1'))
+    send('b-claude', 'hi')
+    expect(texts(l)).toEqual(['hi'])
+  })
+
+  it('waits for join when no name is bound yet, then attaches', () => {
+    const { claim, call, send } = setup()
+    const l = call(bySession('c1'))
+    expect(l.replies).toEqual([])
+    expect(l.closed).toBe(false)
+    claim('/x/b', 'claude', 'c1')
+    send('b-claude', 'after join')
+    expect(texts(l)).toEqual(['after join'])
+  })
+
+  it('binds an explicit name from join and attaches a waiting listener to it', () => {
+    const { call, send, hub } = setup()
+    const l = call(bySession('c1'))
+    expect(call({ op: 'claim', kind: 'claude', session: 'c1', name: 'reviewer' }).last()).toEqual({ type: 'claimed', name: 'reviewer' })
+    expect(hub.status()[0]).toMatchObject({ name: 'reviewer', session: 'c1' })
+    send('reviewer', 'review this')
+    expect(texts(l)).toEqual(['review this'])
+  })
+
+  it('refuses an explicit join on an auto name held by another session', () => {
+    const { claim, call } = setup()
+    claim('/x/b', 'claude', 'c1')
+    expect(call({ op: 'claim', kind: 'claude', session: 'c2', name: 'b-claude' }).last()).toMatchObject({ type: 'error' })
+  })
+
+  it('refuses a second stream listener for the same session', () => {
+    const { claim, call } = setup()
+    claim('/x/b', 'claude', 'c1')
+    const first = call(bySession('c1'))
+    const second = call(bySession('c1'))
+    expect(second.last()).toMatchObject({ type: 'error', message: expect.stringMatching(/already receives/) })
+    expect(first.closed).toBe(false)
+  })
+
+  it('drops a waiting listener that disconnects before join', () => {
+    const { call, hub, claim } = setup()
+    const l = call(bySession('c1'))
+    l.end()
+    hub.disconnect(l)
+    claim('/x/b', 'claude', 'c1')
+    expect(hub.status()[0]?.online).toBe(false)
+  })
+})
+
+describe('rename', () => {
+  const bySession = (session: string) => ({ op: 'listen', kind: 'claude', session, stream: true }) as const
+
+  it('renames the session peer in place, keeping its listener and queue', () => {
+    const { claim, call, send, hub } = setup()
+    claim('/x/b', 'claude', 'c1')
+    const l = call(bySession('c1'))
+    send('b-claude', 'before')
+    call({ op: 'claim', kind: 'claude', session: 'c1', name: 'reviewer' })
+    expect(hub.status().map(p => p.name)).toEqual(['reviewer'])
+    send('reviewer', 'after')
+    expect(l.closed).toBe(false)
+    expect(texts(l)).toEqual(['before'])
+    call({ op: 'ack', as: 'reviewer', id: 'm1' })
+    expect(texts(l)).toEqual(['before', 'after'])
+  })
+
+  it('moves the listener to an existing name and releases the old one', () => {
+    const { claim, call, send, hub, listen } = setup()
+    listen('reviewer', 'claude').end()
+    claim('/x/b', 'claude', 'c1')
+    const l = call(bySession('c1'))
+    call({ op: 'claim', kind: 'claude', session: 'c1', name: 'reviewer' })
+    send('reviewer', 'to the role')
+    expect(texts(l)).toEqual(['to the role'])
+    expect(hub.status().find(p => p.name === 'b-claude')).toMatchObject({ session: null, online: false })
+  })
+
+  it('makes the renamed peer explicit, so its name is no longer locked to the session', () => {
+    const { claim, call, hub } = setup()
+    claim('/x/b', 'claude', 'c1')
+    call({ op: 'claim', kind: 'claude', session: 'c1', name: 'reviewer' })
+    expect(hub.status()[0]?.auto).toBeFalsy()
+  })
+})
