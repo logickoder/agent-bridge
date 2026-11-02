@@ -34,10 +34,10 @@ function memoryStore(peers: Peer[] = [], queues = new Map<string, Message[]>()):
   return s
 }
 
-function setup(store = memoryStore()) {
+function setup(store = memoryStore(), log: (msg: string) => void = () => {}) {
   let n = 0
   const clock = { now: new Date('2026-11-02T00:00:00Z') }
-  const hub = new Hub({ store, now: () => clock.now, newId: () => `m${++n}`, pid: 1 })
+  const hub = new Hub({ store, now: () => clock.now, newId: () => `m${++n}`, pid: 1, log })
   const call = (req: Exclude<Request, { op: 'shutdown' }>, conn = new FakeConn()): FakeConn => {
     hub.handle(req, conn)
     return conn
@@ -50,8 +50,8 @@ function setup(store = memoryStore()) {
     if (r?.type !== 'msg') throw new Error('no message to ack')
     call({ op: 'ack', as, id: r.msg.id })
   }
-  const claim = (base: string, kind: 'claude' | 'agy', session: string): string => {
-    const r = call({ op: 'claim', base, kind, session }).last()
+  const claim = (folder: string, kind: 'claude' | 'agy', session: string): string => {
+    const r = call({ op: 'claim', folder, kind, session }).last()
     if (r?.type !== 'claimed') throw new Error(`claim failed: ${JSON.stringify(r)}`)
     return r.name
   }
@@ -255,28 +255,28 @@ const HOUR = 3600_000
 describe('claim', () => {
   it('gives a new session the base name, bound to it', () => {
     const { claim, hub } = setup()
-    expect(claim('b-agy', 'agy', 's1')).toBe('b-agy')
+    expect(claim('/x/b', 'agy', 's1')).toBe('b-agy')
     expect(hub.status()[0]).toMatchObject({ name: 'b-agy', kind: 'agy', session: 's1' })
   })
 
   it('returns the same name to the same session', () => {
     const { claim } = setup()
-    claim('b-agy', 'agy', 's1')
-    expect(claim('b-agy', 'agy', 's1')).toBe('b-agy')
+    claim('/x/b', 'agy', 's1')
+    expect(claim('/x/b', 'agy', 's1')).toBe('b-agy')
   })
 
   it('never reuses a name held by another session, even an offline one', () => {
     const { claim } = setup()
-    claim('b-agy', 'agy', 's1')
-    expect(claim('b-agy', 'agy', 's2')).toBe('b-agy-2')
-    expect(claim('b-agy', 'agy', 's3')).toBe('b-agy-3')
+    claim('/x/b', 'agy', 's1')
+    expect(claim('/x/b', 'agy', 's2')).toBe('b-agy-2')
+    expect(claim('/x/b', 'agy', 's3')).toBe('b-agy-3')
   })
 
   it('does not supersede the session that holds the base', () => {
     const { claim, listen } = setup()
-    claim('b-agy', 'agy', 's1')
+    claim('/x/b', 'agy', 's1')
     const l = listen('b-agy', 'agy', 's1')
-    claim('b-agy', 'agy', 's2')
+    claim('/x/b', 'agy', 's2')
     expect(l.closed).toBe(false)
   })
 })
@@ -284,36 +284,117 @@ describe('claim', () => {
 describe('pruning', () => {
   it('drops an idle peer with an empty queue after 24 hours and frees its name', () => {
     const { claim, advance, hub } = setup()
-    claim('b-agy', 'agy', 's1')
+    claim('/x/b', 'agy', 's1')
     advance(25 * HOUR)
-    expect(claim('b-agy', 'agy', 's2')).toBe('b-agy')
+    expect(claim('/x/b', 'agy', 's2')).toBe('b-agy')
     expect(hub.status().map(p => p.session)).toEqual(['s2'])
   })
 
   it('keeps a peer with queued messages', () => {
     const { claim, advance, send } = setup()
-    claim('b-agy', 'agy', 's1')
+    claim('/x/b', 'agy', 's1')
     send('b-agy', 'waiting')
     advance(25 * HOUR)
-    expect(claim('b-agy', 'agy', 's2')).toBe('b-agy-2')
+    expect(claim('/x/b', 'agy', 's2')).toBe('b-agy-2')
   })
 
   it('keeps a peer that was active recently', () => {
     const { claim, advance, listen } = setup()
-    claim('b-agy', 'agy', 's1')
+    claim('/x/b', 'agy', 's1')
     advance(23 * HOUR)
     listen('b-agy', 'agy', 's1').end()
     advance(2 * HOUR)
-    expect(claim('b-agy', 'agy', 's2')).toBe('b-agy-2')
+    expect(claim('/x/b', 'agy', 's2')).toBe('b-agy-2')
   })
 })
 
 describe('send to an offline peer', () => {
   it('lists who is listening, without the sender', () => {
     const { claim, listen, send } = setup()
-    claim('b-agy', 'agy', 's1')
+    claim('/x/b', 'agy', 's1')
     listen('b-agy-2', 'agy', 's2')
     listen('lead', 'claude', 'c1', true)
     expect(send('b-agy', 'hi', 'lead').last()).toMatchObject({ type: 'sent', live: false, listening: ['b-agy-2'] })
+  })
+})
+
+describe('lastSeen persistence', () => {
+  it('writes peers at most once an hour for routine activity', () => {
+    const store = memoryStore()
+    let saves = 0
+    const save = store.savePeers
+    store.savePeers = p => {
+      saves++
+      save(p)
+    }
+    const { claim, listen, advance } = setup(store)
+    claim('/x/b', 'agy', 's1')
+    const before = saves
+    for (let i = 0; i < 5; i++) listen('b-agy', 'agy', 's1').end()
+    expect(saves).toBe(before)
+    advance(2 * HOUR)
+    listen('b-agy', 'agy', 's1').end()
+    expect(saves).toBe(before + 1)
+  })
+})
+
+describe('review fixes', () => {
+  it('saves lastSeen for a peer that is active more often than hourly', () => {
+    const store = memoryStore()
+    const { claim, listen, advance } = setup(store)
+    claim('/x/b', 'agy', 's1')
+    for (let i = 0; i < 5; i++) {
+      advance(HOUR / 2)
+      listen('b-agy', 'agy', 's1').end()
+    }
+    const saved = Date.parse(store.peers[0]?.lastSeen ?? '')
+    expect(saved).toBeGreaterThanOrEqual(Date.parse('2026-11-02T01:00:00Z'))
+  })
+
+  it('does not prune at startup, before listeners reconnect', () => {
+    const old = '2026-10-01T00:00:00.000Z'
+    const store = memoryStore([{ name: 'x-claude', kind: 'claude', session: 'c1', joinedAt: old, lastSeen: old, auto: true }])
+    const { hub } = setup(store)
+    expect(hub.status().map(p => p.name)).toEqual(['x-claude'])
+  })
+
+  it('refuses another session listening on an auto name instead of taking it over', () => {
+    const { claim, listen, hub } = setup()
+    claim('/x/b', 'agy', 's2')
+    const stale = listen('b-agy', 'agy', 's1')
+    expect(stale.last()).toMatchObject({ type: 'error', message: expect.stringMatching(/auto name held by another session[\s\S]*agent-bridge join/) })
+    expect(hub.status()[0]?.session).toBe('s2')
+  })
+
+  it('prunes a peer idle for 7 days even with messages queued, and logs it', () => {
+    const logs: string[] = []
+    const { claim, send, advance, call } = setup(memoryStore(), msg => logs.push(msg))
+    claim('/x/b', 'agy', 's1')
+    send('b-agy', 'never read')
+    advance(8 * 24 * HOUR)
+    const r = call({ op: 'claim', folder: '/x/b', kind: 'agy', session: 's2' }).last()
+    expect(r).toEqual({ type: 'claimed', name: 'b-agy' })
+    expect(logs.join('\n')).toMatch(/pruned b-agy.*1 queued message/)
+  })
+
+  it('gives a session its name back after it left', () => {
+    const { claim, call } = setup()
+    claim('/x/b', 'agy', 's1')
+    call({ op: 'leave', as: 'b-agy' })
+    expect(claim('/x/b', 'agy', 's1')).toBe('b-agy')
+  })
+
+  it('fails a claim cleanly when every suffix is taken', () => {
+    const peers = Array.from({ length: 999 }, (_, i) => ({
+      name: i === 0 ? 'b-agy' : `b-agy-${i + 1}`,
+      kind: 'agy' as const,
+      session: `s${i}`,
+      joinedAt: '2026-11-02T00:00:00.000Z',
+    }))
+    const { call } = setup(memoryStore(peers))
+    expect(call({ op: 'claim', folder: '/x/b', kind: 'agy', session: 'new' }).last()).toMatchObject({
+      type: 'error',
+      message: expect.stringMatching(/no free name left for b-agy/),
+    })
   })
 })

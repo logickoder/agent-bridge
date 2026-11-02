@@ -208,12 +208,21 @@ describe('auto names', () => {
   })
 
   it('names a Claude session from its folder and says so in the instructions', async () => {
-    const c = mcp('claude', { AGENT_BRIDGE_BASE: 'agent-bridge-claude', CLAUDE_CODE_SESSION_ID: 'claude-auto-1' })
+    const c = mcp('claude', { AGENT_BRIDGE_FOLDER: '/p/agent-bridge', CLAUDE_CODE_SESSION_ID: 'claude-auto-1' })
     const r = await c.call('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'e2e' } })
     expect(JSON.stringify(r['result'])).toContain('You are peer \\"agent-bridge-claude\\"')
     expect(peer('agent-bridge-claude')).toMatchObject({ kind: 'claude', session: 'claude-auto-1' })
     c.p.kill()
   })
+
+  it('keeps the Claude server up, send-only, when the name cannot be claimed', async () => {
+    const blocker = path.join(HOME, 'not-a-dir')
+    fs.writeFileSync(blocker, '')
+    const c = mcp('claude', { AGENT_BRIDGE_FOLDER: '/p/x', CLAUDE_CODE_SESSION_ID: 'c-fail', AGENT_BRIDGE_HOME: path.join(blocker, 'home') })
+    const r = await c.call('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'e2e' } })
+    expect(JSON.stringify(r['result'])).toMatch(/could not get a peer name/)
+    c.p.kill()
+  }, 15000)
 
   it('names who is listening when the recipient is not', async () => {
     const l = start(['listen', '--as', 'agent-bridge-agy-2'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-2' })

@@ -26,6 +26,11 @@ describe('nextFree', () => {
     expect(nextFree('b-agy', new Set(['b-agy']))).toBe('b-agy-2')
     expect(nextFree('b-agy', new Set(['b-agy', 'b-agy-2', 'b-agy-4']))).toBe('b-agy-3')
   })
+
+  it('stops at -999, the room autoBase keeps', () => {
+    const taken = new Set(['b', ...Array.from({ length: 998 }, (_, i) => `b-${i + 2}`)])
+    expect(nextFree('b', taken)).toBeUndefined()
+  })
 })
 
 describe('inFamily', () => {

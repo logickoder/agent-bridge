@@ -4,7 +4,8 @@ import net from 'node:net'
 import type { Duplex } from 'node:stream'
 import { isDaemonDown, toError } from '../lib/errors.js'
 import { CLI, DAEMON_LOG, ensureHome, SOCK } from '../paths.js'
-import { Reply, type Message, type Request, type ReplyOf } from '../schema.js'
+import type { Identity } from '../names.js'
+import { Reply, type Message, type PeerKind, type Request, type ReplyOf } from '../schema.js'
 import { onLines, writeLine } from '../lib/wire.js'
 
 const RETRY_MS = 50
@@ -76,6 +77,13 @@ export async function stopDaemon(): Promise<void> {
   } catch (err) {
     if (!isDaemonDown(err)) throw err
   }
+}
+
+/** The peer name for an identity: the chosen one, or the auto name the daemon assigns this session. */
+export async function resolveName(identity: Identity, kind: PeerKind, session: string | undefined): Promise<string> {
+  if ('name' in identity) return identity.name
+  if (!session) throw new Error('no session id. An auto name needs one. Run this from inside the agent, or pass a name.')
+  return (await request({ op: 'claim', folder: identity.folder, kind, session }, 'claimed')).name
 }
 
 /** One request, one reply. Rejects on an `error` reply. */

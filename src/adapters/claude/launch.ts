@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process'
 import { peerName } from '../../lib/args.js'
 import { logger } from '../../lib/log.js'
-import { autoBase } from '../../names.js'
+import type { Identity } from '../../names.js'
 import { CLI } from '../../paths.js'
-import { BASE_ENV, PEER_ENV, SERVER, type Identity } from './names.js'
+import { FOLDER_ENV, PEER_ENV, SERVER } from './names.js'
 
 /** Arguments for `claude`: load only this server, for this session only, with the channel enabled. */
 export function claudeArgs(identity: Identity, passthrough: string[], env: NodeJS.ProcessEnv = process.env): string[] {
-  const serverEnv: Record<string, string> = 'name' in identity ? { [PEER_ENV]: identity.name } : { [BASE_ENV]: identity.base }
+  const serverEnv: Record<string, string> = 'name' in identity ? { [PEER_ENV]: identity.name } : { [FOLDER_ENV]: identity.folder }
   const home = env['AGENT_BRIDGE_HOME']
   if (home) serverEnv['AGENT_BRIDGE_HOME'] = home
   const config = { mcpServers: { [SERVER]: { command: process.execPath, args: [CLI, 'mcp', 'claude'], env: serverEnv } } }
@@ -23,7 +23,7 @@ export function parseLaunchArgs(argv: string[]): { name?: string; passthrough: s
 
 export function launchClaude(argv: string[]): void {
   const { name, passthrough } = parseLaunchArgs(argv)
-  const identity: Identity = name ? { name } : { base: autoBase(process.cwd(), 'claude') }
+  const identity: Identity = name ? { name } : { folder: process.cwd() }
   const child = spawn('claude', claudeArgs(identity, passthrough), { stdio: 'inherit' })
   // Claude owns the terminal. Let it handle Ctrl-C.
   process.on('SIGINT', () => {})

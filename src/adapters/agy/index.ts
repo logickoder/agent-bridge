@@ -22,8 +22,8 @@ export const agy: Adapter = {
     join: {
       usage: 'join [name]                    agy: settle this session\'s name (auto: <folder>-agy) and print it',
       run: async args => {
-        const name = args[0] === undefined ? undefined : peerName(args[0], 'Name')
-        process.stdout.write(`${await (await import('./join.js')).join(name, process.env[SESSION_ENV], process.cwd())}\n`)
+        const identity = args[0] === undefined ? { folder: process.cwd() } : { name: peerName(args[0], 'Name') }
+        process.stdout.write(`${await (await import('./join.js')).join(identity, process.env[SESSION_ENV])}\n`)
       },
     },
     listen: {

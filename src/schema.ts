@@ -2,9 +2,13 @@ import { z } from 'zod'
 
 export const PEER_KINDS = ['claude', 'agy'] as const
 
+export const MAX_PEER_NAME = 32
 export const PeerName = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,31}$/, 'Peer names are 1 to 32 characters: lowercase letters, digits and hyphens.')
+  .regex(
+    new RegExp(`^[a-z0-9][a-z0-9-]{0,${MAX_PEER_NAME - 1}}$`),
+    `Peer names are 1 to ${MAX_PEER_NAME} characters: lowercase letters, digits and hyphens.`,
+  )
 export const PeerKind = z.enum(PEER_KINDS)
 
 export const Message = z.object({
@@ -21,8 +25,12 @@ export const Peer = z.object({
   kind: PeerKind,
   session: z.string().nullable(),
   joinedAt: z.string(),
-  /** Last listen, ack, drain or claim. Idle peers are pruned after a day. */
+  /** Last listen, ack, drain or claim. Idle peers are pruned after a day, or a week with mail queued. */
   lastSeen: z.string().optional(),
+  /** Assigned by `claim`. Only its own session may listen on it. */
+  auto: z.boolean().optional(),
+  /** The session that held it before `leave`, so a rejoin gets the same name. */
+  lastSession: z.string().optional(),
 })
 
 export const Request = z.discriminatedUnion('op', [
@@ -33,8 +41,8 @@ export const Request = z.discriminatedUnion('op', [
     session: z.string().min(1).optional(),
     stream: z.boolean(),
   }),
-  /** Get the session's auto-named peer, creating `base` or the lowest free `base-<n>`. */
-  z.object({ op: z.literal('claim'), base: PeerName, kind: PeerKind, session: z.string().min(1) }),
+  /** Get the session's auto-named peer: `<folder>-<kind>`, or the lowest free `-<n>`. */
+  z.object({ op: z.literal('claim'), folder: z.string().min(1), kind: PeerKind, session: z.string().min(1) }),
   z.object({ op: z.literal('send'), from: PeerName, to: PeerName, text: z.string().trim().min(1) }),
   z.object({ op: z.literal('ack'), as: PeerName, id: z.string() }),
   z.object({ op: z.literal('drain'), session: z.string().min(1) }),
@@ -53,7 +61,7 @@ export const Reply = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), message: z.string() }),
   z.object({ type: z.literal('claimed'), name: PeerName }),
   /** `listening`: other peers online now, filled when the recipient is not, so the sender can redirect. */
-  z.object({ type: z.literal('sent'), id: z.string(), live: z.boolean(), queued: z.number(), listening: z.array(PeerName) }),
+  z.object({ type: z.literal('sent'), id: z.string(), live: z.boolean(), queued: z.number(), listening: z.array(PeerName).default([]) }),
   z.object({ type: z.literal('drained'), msgs: z.array(Message) }),
   z.object({ type: z.literal('status'), pid: z.number(), peers: z.array(PeerStatus) }),
   z.object({ type: z.literal('ok') }),

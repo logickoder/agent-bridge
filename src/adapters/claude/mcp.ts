@@ -1,9 +1,11 @@
-import { holdListen, request } from '../../client/index.js'
+import { holdListen, resolveName } from '../../client/index.js'
 import { peerName } from '../../lib/args.js'
+import { toError } from '../../lib/errors.js'
 import { logger } from '../../lib/log.js'
 import { createMcpHandler, serveStdio } from '../../mcp/server.js'
 import { bridgeTools } from '../../mcp/tools.js'
-import { BASE_ENV, PEER_ENV, SESSION_ENV, type Identity } from './names.js'
+import type { Identity } from '../../names.js'
+import { FOLDER_ENV, PEER_ENV, SESSION_ENV } from './names.js'
 
 function instructions(self: string): string {
   return [
@@ -21,14 +23,20 @@ function instructions(self: string): string {
 export async function serveClaudeMcp(identity: Identity | undefined, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const log = logger('claude')
   const session = env[SESSION_ENV] ?? `claude-${process.pid}`
-  const self = !identity
-    ? undefined
-    : 'name' in identity
-      ? identity.name
-      : (await request({ op: 'claim', base: identity.base, kind: 'claude', session }, 'claimed')).name
+  // A failed claim must not take the server down: send and peers still work without a name.
+  let self: string | undefined
+  let unnamed = SEND_ONLY
+  if (identity) {
+    try {
+      self = await resolveName(identity, 'claude', session)
+    } catch (err) {
+      unnamed = `agent-bridge could not get a peer name for this session: ${toError(err).message} This session can send but not receive. Restart it with claude-bridge once the daemon works.`
+      log(unnamed)
+    }
+  }
   const mcp = serveStdio(
     createMcpHandler({
-      instructions: self ? instructions(self) : SEND_ONLY,
+      instructions: self ? instructions(self) : unnamed,
       capabilities: { experimental: { 'claude/channel': {} } },
       tools: bridgeTools(self ? { self } : { asHelp: 'your peer name' }),
       // Claude never tells a server whether channels are on. Only claude-bridge sets the env vars, so only
@@ -62,6 +70,6 @@ const SEND_ONLY = 'agent-bridge is loaded without a peer name, so this session c
 export function identityFromEnv(env: NodeJS.ProcessEnv): Identity | undefined {
   const name = env[PEER_ENV]
   if (name !== undefined) return { name: peerName(name, PEER_ENV) }
-  const base = env[BASE_ENV]
-  return base === undefined ? undefined : { base: peerName(base, BASE_ENV) }
+  const folder = env[FOLDER_ENV]
+  return folder ? { folder } : undefined
 }

@@ -5,6 +5,8 @@ const WAIT_MS = 500
 
 export const listenCommand = (as: string): string => `agent-bridge listen --as ${as}`
 
+export const sendHint = (as: string): string => `Send with the send tool, as "${as}".`
+
 export const rearmHint = (as: string): string =>
   `Before you end your turn, re-arm: run \`${listenCommand(as)}\` with run_command as a background command (WaitMsBeforeAsync ${WAIT_MS}), then end your turn. It wakes you when the next message arrives.`
 

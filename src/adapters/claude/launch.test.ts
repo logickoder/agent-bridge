@@ -31,16 +31,16 @@ describe('claudeArgs', () => {
     })
   })
 
-  it('passes the auto-name base when no name was given', () => {
-    const args = claudeArgs({ base: 'bankstract-claude' }, [], {})
-    expect(serverEnv(args)).toMatchObject({ mcpServers: { 'agent-bridge': { env: { AGENT_BRIDGE_BASE: 'bankstract-claude' } } } })
+  it('passes the folder for an auto name when no name was given', () => {
+    const args = claudeArgs({ folder: '/p/bankstract' }, [], {})
+    expect(serverEnv(args)).toMatchObject({ mcpServers: { 'agent-bridge': { env: { AGENT_BRIDGE_FOLDER: '/p/bankstract' } } } })
   })
 })
 
 describe('identityFromEnv', () => {
-  it('prefers the explicit name, then the base, else none (send-only)', () => {
-    expect(identityFromEnv({ AGENT_BRIDGE_PEER: 'lead', AGENT_BRIDGE_BASE: 'b-claude' })).toEqual({ name: 'lead' })
-    expect(identityFromEnv({ AGENT_BRIDGE_BASE: 'b-claude' })).toEqual({ base: 'b-claude' })
+  it('prefers the explicit name, then the folder, else none (send-only)', () => {
+    expect(identityFromEnv({ AGENT_BRIDGE_PEER: 'lead', AGENT_BRIDGE_FOLDER: '/p/b' })).toEqual({ name: 'lead' })
+    expect(identityFromEnv({ AGENT_BRIDGE_FOLDER: '/p/b' })).toEqual({ folder: '/p/b' })
     expect(identityFromEnv({})).toBeUndefined()
   })
 })

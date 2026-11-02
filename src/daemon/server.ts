@@ -28,7 +28,7 @@ export function runDaemon(): void {
     log('another daemon holds the lock. Exiting.')
     return
   }
-  const hub = new Hub({ store: fileStore(), now: () => new Date(), newId: () => randomUUID().slice(0, 8), pid: process.pid })
+  const hub = new Hub({ store: fileStore(), now: () => new Date(), newId: () => randomUUID().slice(0, 8), pid: process.pid, log })
 
   const exit = (): never => {
     fs.rmSync(SOCK, { force: true })
