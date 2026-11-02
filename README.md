@@ -44,7 +44,7 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 - The agy hook removes messages only after it has printed them. If it hits its time cap first, they stay queued. A failed ack shows them again next turn: a duplicate, never a loss.
 - `send` reports "Delivered live" only when the message went out at once. One queued behind a message in flight reports "Queued".
 - One daemon at a time, enforced by a lock file. Clients start it on demand.
-- A push endpoint (agy) is acked only when `send-message` succeeds. A failure keeps the message queued, drops the endpoint, and the fallbacks take over. Endpoints live in daemon memory, so after a daemon or agy restart, run `/bridge` again to restore direct delivery.
+- A push endpoint (agy) is acked only when `send-message` succeeds. A failure keeps the message queued, drops the endpoint, and the fallbacks take over. Endpoints live in daemon memory. After a daemon restart, agy's hook asks it once to run `join` again, which restores direct delivery at its next turn. After an agy restart, run `/bridge` again. The daemon runs only an absolute path to an executable named `agy`.
 
 ### Names
 

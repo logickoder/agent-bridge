@@ -58,6 +58,8 @@ Target: agy (Antigravity CLI) 1.4.12, Claude Code 2.1.316, macOS.
 | agy passes `as` on each send | agy's MCP server process has no session id. The `/bridge` skill and every message tell agy its name |
 | Hub is pure, store injected | Delivery and binding rules are unit-tested without sockets or disk |
 | Strict TypeScript, zod at boundaries, tsc to `dist/` | The code grew past what one untyped file holds. Follows the owner's TypeScript rules |
+| After a daemon restart, the hook asks agy to rejoin | Hooks lack the token (agy finding/open question 10), so only `join` can register. Drain replies carry `rejoin` once per daemon run for a bound session without an endpoint; the hook injects a one-line request to run `join`. Chosen over saving the token to disk |
+| Push runs only an absolute `.../agy` | The endpoint arrives over the socket. The socket is 0600, so this is defence in depth, not a privilege boundary |
 | agy receives by agentapi push by default | agy finding 8. No background listener, no re-arm loop. A push endpoint is a listener in the hub (`PushConn`), so delivery, ack and fallback reuse the same rules. The token stays in daemon memory and travels to agentapi in its environment, never its arguments |
 | Claude receives through a plugin monitor by default, channels opt-in | Claude findings 4 to 7: a monitor wakes an idle session, gets the session id, and starts on `/bridge`. No launch flag, no notice. Channels stay for direct push, behind `agent-bridge claude` |
 | Listen by session, wait for `claim` | The monitor's command is fixed and starts when the skill is invoked, possibly before `join`. It cannot know the name, so the daemon parks it until the session holds one |
@@ -126,5 +128,5 @@ Steps:
 7. ~~Does `/bridge` invoke the skill as a slash command?~~ Yes (live, 2026-11-02).
 8. ~~Is the cwd the project folder in both agents?~~ Yes: both got `agent-bridge-<kind>` (live, 2026-11-02).
 9. Does `claude --resume` keep `CLAUDE_CODE_SESSION_ID`, and so the auto name?
-10. Does agy's PreInvocation hook get `ANTIGRAVITY_LS_ADDRESS` and `ANTIGRAVITY_CSRF_TOKEN`? If so, it could re-register the push endpoint after a daemon restart.
+10. ~~Does agy's PreInvocation hook get `ANTIGRAVITY_LS_ADDRESS` and `ANTIGRAVITY_CSRF_TOKEN`?~~ No. A probe hook (2026-11-02) saw only `ANTIGRAVITY_CONVERSATION_ID`. Only `run_command` gets the address and token, so only `join` can register the push endpoint.
 11. Does `agentapi send-message` still work after agy restarts and resumes the same conversation (new address)?
