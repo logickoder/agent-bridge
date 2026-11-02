@@ -1,4 +1,8 @@
+import { inFamily, nextFree } from '../names.js'
 import type { Message, Peer, PeerKind, PeerStatus, Reply, Request } from '../schema.js'
+
+/** A peer with nothing queued and no activity for this long is dropped, freeing its name. */
+const PRUNE_AFTER_MS = 24 * 3600_000
 
 /** One client connection, as the hub sees it. */
 export interface Conn {
@@ -11,6 +15,7 @@ export interface Store {
   load(): { peers: Peer[]; queues: Map<string, Message[]> }
   savePeers(peers: Peer[]): void
   saveQueue(name: string, msgs: Message[]): void
+  dropQueue(name: string): void
 }
 
 export interface HubDeps {
@@ -31,6 +36,7 @@ interface Waiter {
 
 type ListenRequest = Extract<Request, { op: 'listen' }>
 type SendRequest = Extract<Request, { op: 'send' }>
+type ClaimRequest = Extract<Request, { op: 'claim' }>
 type HubRequest = Exclude<Request, { op: 'shutdown' }>
 
 /**
@@ -40,6 +46,8 @@ type HubRequest = Exclude<Request, { op: 'shutdown' }>
  * - One message in flight per peer, removed only on ack. A dropped connection puts it back.
  * - A peer name binds to the newest session that listens with a session id. Older listeners are
  *   told they were superseded. Listeners without a session id only work while the name is unbound.
+ * - `claim` gives a session its auto name: `base`, or the lowest free `base-<n>`. A name held by another
+ *   session is never reused, online or not, until it is pruned. The same session always gets the same name.
  * - `drain` shows queued messages to whichever session a peer is bound to, and to nobody else.
  *   They leave the queue on `ack-drained`, so a hook that dies before printing loses nothing.
  */
@@ -54,17 +62,21 @@ export class Hub {
     const { peers, queues } = deps.store.load()
     for (const p of peers) this.peers.set(p.name, p)
     for (const [name, msgs] of queues) this.queues.set(name, msgs)
+    this.prune()
   }
 
   handle(req: HubRequest, conn: Conn): void {
     switch (req.op) {
       case 'listen':
         return this.listen(req, conn)
+      case 'claim':
+        return this.reply(conn, { type: 'claimed', name: this.claim(req) })
       case 'send':
         return this.send(req, conn)
       case 'ack':
         return this.ack(req.as, req.id)
       case 'drain':
+        this.touchSession(req.session)
         return this.reply(conn, { type: 'drained', msgs: this.drain(req.session) })
       case 'ack-drained':
         this.ackDrained(req.session, req.ids)
@@ -106,10 +118,25 @@ export class Hub {
         `"${peer.name}" is bound to session ${peer.session} and this listener has no session id. Run it from inside the agent, or run \`agent-bridge leave ${peer.name}\`.`,
       )
     }
+    this.touch(peer)
     const waiter: Waiter = { name: peer.name, conn, stream: req.stream, session }
     this.waitersOf(peer.name).push(waiter)
     this.byConn.set(conn, waiter)
     this.pump(peer.name)
+  }
+
+  private claim(req: ClaimRequest): string {
+    this.prune()
+    for (const p of this.peers.values()) {
+      if (p.session === req.session && p.kind === req.kind && inFamily(p.name, req.base)) {
+        this.touch(p)
+        return p.name
+      }
+    }
+    const peer = this.addPeer(nextFree(req.base, new Set(this.peers.keys())), req.kind)
+    peer.session = req.session
+    this.savePeers()
+    return peer.name
   }
 
   private send(req: SendRequest, conn: Conn): void {
@@ -124,7 +151,11 @@ export class Hub {
     this.deps.store.saveQueue(peer.name, q)
     this.pump(peer.name)
     // Live means this message went out now, not that a listener exists: one behind an in-flight message waits.
-    this.reply(conn, { type: 'sent', id: msg.id, live: this.inflight.get(peer.name)?.id === msg.id, queued: q.length })
+    const live = this.inflight.get(peer.name)?.id === msg.id
+    const listening = this.liveWaiters(peer).length
+      ? []
+      : [...this.peers.values()].filter(p => p.name !== peer.name && p.name !== req.from && this.liveWaiters(p).length).map(p => p.name)
+    this.reply(conn, { type: 'sent', id: msg.id, live, queued: q.length, listening })
   }
 
   private ack(name: string, id: string): void {
@@ -134,6 +165,8 @@ export class Hub {
     q.shift()
     this.deps.store.saveQueue(name, q)
     this.inflight.delete(name)
+    const acked = this.peers.get(name)
+    if (acked) this.touch(acked)
     const w = held.waiter
     if (w.supersededBy) this.evict(w, { type: 'superseded', by: w.supersededBy })
     else if (!w.stream) {
@@ -153,6 +186,7 @@ export class Hub {
   }
 
   private ackDrained(session: string, ids: string[]): void {
+    this.touchSession(session)
     const done = new Set(ids)
     for (const p of this.boundTo(session)) {
       const q = this.queue(p.name)
@@ -211,8 +245,34 @@ export class Hub {
     return this.waitersOf(peer.name).filter(w => !w.conn.closed && w.session === peer.session)
   }
 
+  private touch(peer: Peer): void {
+    peer.lastSeen = this.deps.now().toISOString()
+    this.savePeers()
+  }
+
+  private touchSession(session: string): void {
+    for (const p of this.boundTo(session)) this.touch(p)
+  }
+
+  /** Drops peers idle past PRUNE_AFTER_MS with nothing queued and nobody listening. */
+  private prune(): void {
+    const cutoff = this.deps.now().getTime() - PRUNE_AFTER_MS
+    let dropped = false
+    for (const p of [...this.peers.values()]) {
+      const seen = Date.parse(p.lastSeen ?? p.joinedAt)
+      if (seen > cutoff || this.queue(p.name).length || this.waitersOf(p.name).length) continue
+      this.peers.delete(p.name)
+      this.queues.delete(p.name)
+      this.waiters.delete(p.name)
+      this.deps.store.dropQueue(p.name)
+      dropped = true
+    }
+    if (dropped) this.savePeers()
+  }
+
   private addPeer(name: string, kind: PeerKind): Peer {
-    const peer: Peer = { name, kind, session: null, joinedAt: this.deps.now().toISOString() }
+    const now = this.deps.now().toISOString()
+    const peer: Peer = { name, kind, session: null, joinedAt: now, lastSeen: now }
     this.peers.set(name, peer)
     this.savePeers()
     return peer

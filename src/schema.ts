@@ -21,6 +21,8 @@ export const Peer = z.object({
   kind: PeerKind,
   session: z.string().nullable(),
   joinedAt: z.string(),
+  /** Last listen, ack, drain or claim. Idle peers are pruned after a day. */
+  lastSeen: z.string().optional(),
 })
 
 export const Request = z.discriminatedUnion('op', [
@@ -31,6 +33,8 @@ export const Request = z.discriminatedUnion('op', [
     session: z.string().min(1).optional(),
     stream: z.boolean(),
   }),
+  /** Get the session's auto-named peer, creating `base` or the lowest free `base-<n>`. */
+  z.object({ op: z.literal('claim'), base: PeerName, kind: PeerKind, session: z.string().min(1) }),
   z.object({ op: z.literal('send'), from: PeerName, to: PeerName, text: z.string().trim().min(1) }),
   z.object({ op: z.literal('ack'), as: PeerName, id: z.string() }),
   z.object({ op: z.literal('drain'), session: z.string().min(1) }),
@@ -47,7 +51,9 @@ export const Reply = z.discriminatedUnion('type', [
   z.object({ type: z.literal('superseded'), by: z.string() }),
   z.object({ type: z.literal('stopped') }),
   z.object({ type: z.literal('error'), message: z.string() }),
-  z.object({ type: z.literal('sent'), id: z.string(), live: z.boolean(), queued: z.number() }),
+  z.object({ type: z.literal('claimed'), name: PeerName }),
+  /** `listening`: other peers online now, filled when the recipient is not, so the sender can redirect. */
+  z.object({ type: z.literal('sent'), id: z.string(), live: z.boolean(), queued: z.number(), listening: z.array(PeerName) }),
   z.object({ type: z.literal('drained'), msgs: z.array(Message) }),
   z.object({ type: z.literal('status'), pid: z.number(), peers: z.array(PeerStatus) }),
   z.object({ type: z.literal('ok') }),

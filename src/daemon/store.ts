@@ -38,5 +38,6 @@ export function fileStore(): Store {
     },
     savePeers: peers => writeJson(PEERS_FILE, peers),
     saveQueue: (name, msgs) => writeJson(path.join(QUEUE_DIR, `${name}.json`), msgs),
+    dropQueue: name => fs.rmSync(path.join(QUEUE_DIR, `${name}.json`), { force: true }),
   }
 }

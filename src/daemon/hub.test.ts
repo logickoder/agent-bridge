@@ -27,13 +27,17 @@ function memoryStore(peers: Peer[] = [], queues = new Map<string, Message[]>()):
     saveQueue: (name: string, msgs: Message[]) => {
       s.queues.set(name, structuredClone(msgs))
     },
+    dropQueue: (name: string) => {
+      s.queues.delete(name)
+    },
   }
   return s
 }
 
 function setup(store = memoryStore()) {
   let n = 0
-  const hub = new Hub({ store, now: () => new Date('2026-11-02T00:00:00Z'), newId: () => `m${++n}`, pid: 1 })
+  const clock = { now: new Date('2026-11-02T00:00:00Z') }
+  const hub = new Hub({ store, now: () => clock.now, newId: () => `m${++n}`, pid: 1 })
   const call = (req: Exclude<Request, { op: 'shutdown' }>, conn = new FakeConn()): FakeConn => {
     hub.handle(req, conn)
     return conn
@@ -46,7 +50,15 @@ function setup(store = memoryStore()) {
     if (r?.type !== 'msg') throw new Error('no message to ack')
     call({ op: 'ack', as, id: r.msg.id })
   }
-  return { hub, store, call, listen, send, ack }
+  const claim = (base: string, kind: 'claude' | 'agy', session: string): string => {
+    const r = call({ op: 'claim', base, kind, session }).last()
+    if (r?.type !== 'claimed') throw new Error(`claim failed: ${JSON.stringify(r)}`)
+    return r.name
+  }
+  const advance = (ms: number) => {
+    clock.now = new Date(clock.now.getTime() + ms)
+  }
+  return { hub, store, call, listen, send, ack, claim, advance }
 }
 
 const texts = (conn: FakeConn) => conn.replies.flatMap(r => (r.type === 'msg' ? [r.msg.text] : []))
@@ -72,7 +84,7 @@ describe('send', () => {
     listen('agy', 'agy').end()
     hub.disconnect(new FakeConn())
     const r = send('agy', 'hi').last()
-    expect(r).toEqual({ type: 'sent', id: 'm1', live: false, queued: 1 })
+    expect(r).toEqual({ type: 'sent', id: 'm1', live: false, queued: 1, listening: [] })
   })
 })
 
@@ -235,5 +247,73 @@ describe('binding', () => {
     call({ op: 'leave', as: 'agy' })
     expect(l.last()).toEqual({ type: 'stopped' })
     expect(hub.status()[0]).toMatchObject({ session: null, online: false })
+  })
+})
+
+const HOUR = 3600_000
+
+describe('claim', () => {
+  it('gives a new session the base name, bound to it', () => {
+    const { claim, hub } = setup()
+    expect(claim('b-agy', 'agy', 's1')).toBe('b-agy')
+    expect(hub.status()[0]).toMatchObject({ name: 'b-agy', kind: 'agy', session: 's1' })
+  })
+
+  it('returns the same name to the same session', () => {
+    const { claim } = setup()
+    claim('b-agy', 'agy', 's1')
+    expect(claim('b-agy', 'agy', 's1')).toBe('b-agy')
+  })
+
+  it('never reuses a name held by another session, even an offline one', () => {
+    const { claim } = setup()
+    claim('b-agy', 'agy', 's1')
+    expect(claim('b-agy', 'agy', 's2')).toBe('b-agy-2')
+    expect(claim('b-agy', 'agy', 's3')).toBe('b-agy-3')
+  })
+
+  it('does not supersede the session that holds the base', () => {
+    const { claim, listen } = setup()
+    claim('b-agy', 'agy', 's1')
+    const l = listen('b-agy', 'agy', 's1')
+    claim('b-agy', 'agy', 's2')
+    expect(l.closed).toBe(false)
+  })
+})
+
+describe('pruning', () => {
+  it('drops an idle peer with an empty queue after 24 hours and frees its name', () => {
+    const { claim, advance, hub } = setup()
+    claim('b-agy', 'agy', 's1')
+    advance(25 * HOUR)
+    expect(claim('b-agy', 'agy', 's2')).toBe('b-agy')
+    expect(hub.status().map(p => p.session)).toEqual(['s2'])
+  })
+
+  it('keeps a peer with queued messages', () => {
+    const { claim, advance, send } = setup()
+    claim('b-agy', 'agy', 's1')
+    send('b-agy', 'waiting')
+    advance(25 * HOUR)
+    expect(claim('b-agy', 'agy', 's2')).toBe('b-agy-2')
+  })
+
+  it('keeps a peer that was active recently', () => {
+    const { claim, advance, listen } = setup()
+    claim('b-agy', 'agy', 's1')
+    advance(23 * HOUR)
+    listen('b-agy', 'agy', 's1').end()
+    advance(2 * HOUR)
+    expect(claim('b-agy', 'agy', 's2')).toBe('b-agy-2')
+  })
+})
+
+describe('send to an offline peer', () => {
+  it('lists who is listening, without the sender', () => {
+    const { claim, listen, send } = setup()
+    claim('b-agy', 'agy', 's1')
+    listen('b-agy-2', 'agy', 's2')
+    listen('lead', 'claude', 'c1', true)
+    expect(send('b-agy', 'hi', 'lead').last()).toMatchObject({ type: 'sent', live: false, listening: ['b-agy-2'] })
   })
 })
