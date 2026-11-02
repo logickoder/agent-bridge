@@ -26,3 +26,11 @@ export function writeLine(stream: Writable, value: unknown, done?: () => void): 
   if (stream.destroyed || stream.writableEnded) return
   stream.write(`${JSON.stringify(value)}\n`, done)
 }
+
+/** Reads all of stdin as text. For hooks, which get one JSON document on stdin. */
+export async function readStdin(): Promise<string> {
+  let buf = ''
+  process.stdin.setEncoding('utf8')
+  for await (const chunk of process.stdin) buf += String(chunk)
+  return buf
+}

@@ -1,4 +1,4 @@
-import { fenceBody, senderLabel } from '../../format.js'
+import { fenceBody, messageHeader, replyOr } from '../../format.js'
 import type { Message } from '../../schema.js'
 
 // Monitor events are single lines, so every message and notice fits on one.
@@ -7,12 +7,12 @@ const sendCommand = (as: string, to: string): string => `agent-bridge send --as 
 
 /** One monitor line per message: sender, recipient, the text with newlines escaped, and how to reply. */
 export function monitorLine(m: Message): string {
-  return `[agent-bridge] Message from ${senderLabel(m)} to ${m.to} (id ${m.id}), text as JSON: ${JSON.stringify(m.text)} Reply with: ${sendCommand(m.to, m.from)}`
+  return `${messageHeader(m)}, text as JSON: ${JSON.stringify(m.text)} ${replyOr(m, `Reply with: ${sendCommand(m.to, m.from)}`)}`
 }
 
 /** What the inbox socket delivers. Claude shows it as a message from another session. */
 export function socketText(m: Message): string {
-  return `[agent-bridge] Message from ${senderLabel(m)} to ${m.to} (id ${m.id}):\n${fenceBody(m.text)}\n\nReply with: ${sendCommand(m.to, m.from)}`
+  return `${messageHeader(m)}:\n${fenceBody(m.text)}\n\n${replyOr(m, `Reply with: ${sendCommand(m.to, m.from)}`)}`
 }
 
 /** What `join` prints for Claude after the name. */

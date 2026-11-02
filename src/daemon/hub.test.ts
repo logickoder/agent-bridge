@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { sessionTag } from '../names.js'
 import { Hub, type Conn, type Store } from './hub.js'
 import type { Message, Peer, Reply, Request } from '../schema.js'
 
@@ -167,7 +168,7 @@ describe('binding', () => {
     const { listen, send, hub } = setup()
     const old = listen('agy', 'agy', 's1')
     const next = listen('agy', 'agy', 's2')
-    expect(old.last()).toEqual({ type: 'superseded', by: 's2' })
+    expect(old.last()).toEqual({ type: 'superseded', by: sessionTag('s2') })
     expect(old.closed).toBe(true)
     send('agy', 'for s2')
     expect(texts(next)).toEqual(['for s2'])
@@ -177,7 +178,7 @@ describe('binding', () => {
   it('refuses an untagged listener while bound', () => {
     const { listen } = setup()
     listen('agy', 'agy', 's1')
-    expect(listen('agy', 'agy').last()).toMatchObject({ type: 'error', message: expect.stringMatching(/bound to session s1/) })
+    expect(listen('agy', 'agy').last()).toMatchObject({ type: 'error', message: expect.stringMatching(new RegExp(`bound to session ${sessionTag('s1')}`)) })
   })
 
   it('serves untagged listeners while unbound', () => {
@@ -237,7 +238,7 @@ describe('binding', () => {
     const next = listen('lead', 'claude', 'c2', true)
     expect(old.closed).toBe(false)
     ack('lead', old)
-    expect(old.last()).toEqual({ type: 'superseded', by: 'c2' })
+    expect(old.last()).toEqual({ type: 'superseded', by: sessionTag('c2') })
     expect(old.closed).toBe(true)
     expect(hub.status()[0]).toMatchObject({ session: 'c2', online: true })
     expect(next.closed).toBe(false)
@@ -691,7 +692,7 @@ describe('taking an online name', () => {
     const { call, listen } = setup()
     const held = listen('reviewer', 'claude', 'c1', true)
     expect(call({ op: 'claim', kind: 'claude', session: 'c2', name: 'reviewer', take: true }).last()).toEqual({ type: 'claimed', name: 'reviewer' })
-    expect(held.last()).toEqual({ type: 'superseded', by: 'c2' })
+    expect(held.last()).toEqual({ type: 'superseded', by: sessionTag('c2') })
   })
 
   it('sends a push-mode holder a takeover notice before dropping its endpoint', async () => {
@@ -702,5 +703,56 @@ describe('taking an online name', () => {
     call({ op: 'claim', kind: 'agy', session: 's2', name: 'planner', take: true })
     await new Promise(r => setTimeout(r, 0))
     expect(texts.join('\n')).toMatch(/Another session took over "planner"/)
+  })
+})
+
+describe('code review fixes', () => {
+  it('accepts an ack under the old name after an in-place rename', () => {
+    const { claim, call, send } = setup()
+    claim('/x/c', 'claude', 'c1')
+    const l = call({ op: 'listen', kind: 'claude', session: 'c1', stream: true })
+    send('c-claude', 'first')
+    send('c-claude', 'second')
+    call({ op: 'claim', kind: 'claude', session: 'c1', name: 'planner' })
+    call({ op: 'ack', as: 'c-claude', id: 'm1' })
+    expect(texts(l)).toEqual(['first', 'second'])
+  })
+
+  it('carries the old queue over when a session moves onto an existing name', () => {
+    const { claim, call, send, listen, hub } = setup()
+    listen('planner', 'claude').end()
+    claim('/x/c', 'claude', 'c1')
+    send('c-claude', 'waiting')
+    const l = call({ op: 'listen', kind: 'claude', session: 'c1', stream: true })
+    call({ op: 'ack', as: 'c-claude', id: 'm1' })
+    send('c-claude', 'queued 1')
+    call({ op: 'claim', kind: 'claude', session: 'c1', name: 'planner' })
+    expect(texts(l)).toContain('queued 1')
+    expect(hub.status().find(p => p.name === 'c-claude')?.queued).toBe(0)
+  })
+
+  it('names the new holder by tag, never by raw session id, in a takeover', async () => {
+    const { sessionTag } = await import('../names.js')
+    const { call, listen } = setup()
+    const held = listen('reviewer', 'claude', 'c1', true)
+    call({ op: 'claim', kind: 'claude', session: 'raw-new-session', name: 'reviewer', take: true })
+    expect(held.last()).toEqual({ type: 'superseded', by: sessionTag('raw-new-session') })
+  })
+
+  it('does not print the bound session id when refusing an untagged listener', () => {
+    const { listen } = setup()
+    listen('agy', 'agy', 'raw-bound-session')
+    expect(JSON.stringify(listen('agy', 'agy').last())).not.toContain('raw-bound-session')
+  })
+
+  it('sends the takeover notice as a checked bridge message, stamped by the hub clock', async () => {
+    const got: Message[] = []
+    const { call } = setup(memoryStore(), () => {}, async (_k, _e, msg) => void got.push(msg))
+    call({ op: 'claim', kind: 'agy', session: 's1', name: 'planner' })
+    call({ op: 'push', kind: 'agy', session: 's1', endpoint: {} })
+    call({ op: 'claim', kind: 'agy', session: 's2', name: 'planner', take: true })
+    await new Promise(r => setTimeout(r, 0))
+    const notice = got.find(m => m.from === 'agent-bridge')
+    expect(notice).toMatchObject({ verified: true, ts: '2026-11-02T00:00:00.000Z' })
   })
 })

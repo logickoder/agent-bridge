@@ -3,7 +3,7 @@ import { ADAPTERS } from './adapters/index.js'
 import type { Command } from './adapters/types.js'
 import { request, resolveName, stopDaemon } from './client/index.js'
 import { formatPeers, formatSent } from './format.js'
-import { peerName, takeFlag } from './lib/args.js'
+import { peerName, takeFlag, takeSwitch } from './lib/args.js'
 import { toError } from './lib/errors.js'
 import { logger } from './lib/log.js'
 import { sessionTag } from './names.js'
@@ -29,9 +29,17 @@ const USAGE = [
   '  daemon                         hub process (auto-started)',
 ].join('\n')
 
+/** The agent sessions this shell belongs to, from each adapter's session env var. */
+function envSessions(): { adapter: (typeof adapters)[number]; id: string }[] {
+  return adapters.flatMap(adapter => {
+    const id = process.env[adapter.sessionEnv]
+    return id ? [{ adapter, id }] : []
+  })
+}
+
 /** The one agent whose session id is in this shell. Ambiguous or none: ask for --kind. */
 function sessionAdapter(): (typeof adapters)[number] {
-  const found = adapters.filter(a => process.env[a.sessionEnv])
+  const found = envSessions().map(s => s.adapter)
   const [only] = found
   if (only && found.length === 1) return only
   const why = found.length ? `this shell has session ids for ${found.map(a => a.kind).join(' and ')}` : 'this shell has no agent session id'
@@ -59,10 +67,7 @@ async function main(argv: string[]): Promise<void> {
       const peer = peerName(to, 'Recipient')
       // The agent sessions this shell belongs to. The daemon checks `from` against them. Without --as the
       // sender is plain `shell`, which no session holds, so no session is attached and it goes unverified.
-      const sessions = args[0] !== '--as' ? [] : adapters.flatMap(a => {
-        const id = process.env[a.sessionEnv]
-        return id ? [id] : []
-      })
+      const sessions = args[0] !== '--as' ? [] : envSessions().map(s => s.id)
       const r = await request({ op: 'send', from, to: peer, text: words.join(' '), ...(sessions.length ? { sessions } : {}) }, 'sent')
       return out(formatSent(peer, r))
     }
@@ -71,10 +76,8 @@ async function main(argv: string[]): Promise<void> {
       return out(JSON.stringify({ pid: r.pid, home: HOME, peers: r.peers }, null, 2))
     }
     case 'join': {
-      const noPush = args.includes('--no-push')
-      if (noPush) args.splice(args.indexOf('--no-push'), 1)
-      const take = args.includes('--take')
-      if (take) args.splice(args.indexOf('--take'), 1)
+      const noPush = takeSwitch(args, '--no-push')
+      const take = takeSwitch(args, '--take')
       const kindFlag = takeFlag(args, '--kind')
       const adapter = kindFlag === undefined ? sessionAdapter() : ADAPTERS[PeerKind.parse(kindFlag)]
       const identity = args[0] === undefined ? { folder: process.cwd() } : { name: peerName(args[0], 'Name') }
@@ -96,13 +99,10 @@ async function main(argv: string[]): Promise<void> {
     }
     case 'peers': {
       const { peers: list } = await request({ op: 'status' }, 'status')
-      return out(formatPeers(list, { all: args.includes('--all') }))
+      return out(formatPeers(list, { all: takeSwitch(args, '--all') }))
     }
     case 'whoami': {
-      const sessions = adapters.flatMap(a => {
-        const id = process.env[a.sessionEnv]
-        return id ? [id] : []
-      })
+      const sessions = envSessions().map(s => s.id)
       if (!sessions.length) throw new Error('no agent session id in this shell. Run whoami from inside an agent session.')
       const { peers } = await request({ op: 'status' }, 'status')
       const tags = sessions.map(sessionTag)

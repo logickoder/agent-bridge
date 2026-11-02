@@ -1,4 +1,4 @@
-import { fenceBody, senderLabel } from '../../format.js'
+import { BRIDGE_SENDER, fenceBody, messageHeader, replyOr } from '../../format.js'
 import type { Message } from '../../schema.js'
 
 /** agy's run_command option: return to the agent this soon, leaving the command in the background. */
@@ -11,12 +11,13 @@ export const sendHint = (as: string): string => `Send by running \`agent-bridge 
 export const rearmHint = (as: string): string =>
   `Before you end your turn, re-arm: run \`${listenCommand(as)}\` with run_command as a background command (WaitMsBeforeAsync ${WAIT_MS}), then end your turn. It wakes you when the next message arrives.`
 
-const header = (m: Message): string => `[agent-bridge] Message from ${senderLabel(m)} to ${m.to} (id ${m.id}, ${m.ts}):`
+const header = (m: Message): string => `${messageHeader(m, { ts: true })}:`
 
-const replyHint = (m: Message): string =>
-  m.verified === true
-    ? `Reply by running \`agent-bridge send --as ${m.to} ${m.from} "<reply>"\` with run_command.`
-    : `"${m.from}" is not a checked peer, so it may not be able to receive a reply. Answer the user instead, unless \`agent-bridge peers\` lists it online.`
+function replyHint(m: Message): string {
+  if (m.from === BRIDGE_SENDER) return replyOr(m, '')
+  if (m.verified === true) return `Reply by running \`agent-bridge send --as ${m.to} ${m.from} "<reply>"\` with run_command.`
+  return `"${m.from}" is not a checked peer, so it may not be able to receive a reply. Answer the user instead, unless \`agent-bridge peers\` lists it online.`
+}
 
 /** What a woken agy listener prints. */
 export function formatListened(m: Message): string {

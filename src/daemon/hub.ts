@@ -1,3 +1,4 @@
+import { BRIDGE_SENDER } from '../format.js'
 import { autoBase, inFamily, nextFree, sessionTag } from '../names.js'
 import type { Message, Peer, PeerKind, PeerStatus, Reply, Request } from '../schema.js'
 
@@ -13,6 +14,10 @@ export interface Conn {
   send(reply: Reply): void
   end(): void
   readonly closed: boolean
+  /** Delivery finishes later (a push endpoint), so a message handed to it is not yet "live". */
+  readonly async?: boolean
+  /** Tells the session something outside the message flow, e.g. that another session took its name. */
+  notice?(name: string, text: string): void
 }
 
 export interface Store {
@@ -44,10 +49,13 @@ function redact(p: PeerStatus): PeerStatus {
  */
 class PushConn implements Conn {
   closed = false
+  readonly async = true
   constructor(
     private readonly hub: Hub,
     private readonly deliver: NonNullable<HubDeps['deliver']>,
     private readonly kind: PeerKind,
+    private readonly now: () => Date,
+    readonly session: string,
     readonly endpoint: Record<string, string>,
     private readonly onDrop: (conn: PushConn, why: string) => void,
   ) {}
@@ -70,7 +78,8 @@ class PushConn implements Conn {
 
   /** Pushes one notice from the bridge itself, best effort. A push-mode session has no listener to print it. */
   notice(to: string, text: string): void {
-    const msg: Message = { id: 'notice', from: 'agent-bridge', to, text, ts: new Date().toISOString() }
+    // From the bridge itself, so marked checked: agents should not treat it as a possibly forged peer message.
+    const msg: Message = { id: 'notice', from: BRIDGE_SENDER, to, text, ts: this.now().toISOString(), verified: true }
     void this.deliver(this.kind, this.endpoint, msg).catch(() => {})
   }
 }
@@ -118,9 +127,11 @@ export class Hub {
 
   constructor(private readonly deps: HubDeps) {
     const { peers, queues } = deps.store.load()
-    for (const p of peers) this.peers.set(p.name, p)
+    for (const p of peers) {
+      this.peers.set(p.name, p)
+      this.savedSeen.set(p.name, this.seenAt(p))
+    }
     for (const [name, msgs] of queues) this.queues.set(name, msgs)
-    for (const p of peers) this.savedSeen.set(p.name, this.seenAt(p))
     // No prune here: listeners have not reconnected yet, so every peer looks idle.
   }
 
@@ -196,7 +207,7 @@ export class Hub {
     if (peer.session && session !== peer.session) {
       return this.fail(
         conn,
-        `"${peer.name}" is bound to session ${peer.session} and this listener has no session id. Run it from inside the agent, or run \`agent-bridge leave ${peer.name}\`.`,
+        `"${peer.name}" is bound to session ${sessionTag(peer.session)} and this listener has no session id. Run it from inside the agent, or run \`agent-bridge leave ${peer.name}\`.`,
       )
     }
     if (req.stream && session && this.waitersOf(peer.name).some(w => w.stream && w.session === session && !w.conn.closed)) {
@@ -214,7 +225,7 @@ export class Hub {
     const old = this.pushers.get(session)
     if (old) this.dropPusher(old)
     let refused: string | undefined
-    const conn = new PushConn(this, deliver, kind, endpoint, (c, why) => {
+    const conn = new PushConn(this, deliver, kind, this.deps.now, session, endpoint, (c, why) => {
       refused ??= why
       this.deps.log?.(`push endpoint for session ${sessionTag(session)} dropped: ${why}`)
       this.dropPusher(c)
@@ -235,11 +246,10 @@ export class Hub {
   private dropPusher(conn: PushConn): void {
     if (conn.closed) return
     conn.closed = true
-    for (const [session, c] of this.pushers) {
-      if (c !== conn) continue
-      this.pushers.delete(session)
+    if (this.pushers.get(conn.session) === conn) {
+      this.pushers.delete(conn.session)
       // A lost endpoint earns a fresh rejoin hint, even if one was used earlier this run.
-      this.rejoinAsked.delete(session)
+      this.rejoinAsked.delete(conn.session)
     }
     this.disconnect(conn)
   }
@@ -326,6 +336,14 @@ export class Hub {
       old.lastSession = session
       old.session = null
       this.savePeers()
+      // The session's unread messages follow it to the new name.
+      const carried = this.queue(from).splice(this.inflight.has(from) ? 1 : 0).map(m => ({ ...m, to }))
+      if (carried.length) {
+        const q = this.queue(to)
+        q.push(...carried)
+        this.deps.store.saveQueue(from, this.queue(from))
+        this.deps.store.saveQueue(to, q)
+      }
     }
     this.pump(from)
     this.pump(to)
@@ -377,13 +395,16 @@ export class Hub {
     const head = this.inflight.get(peer.name)
     const sentNow = head?.id === msg.id
     // A push endpoint's delivery is still running; only a socket listener counts as live.
-    const pushed = sentNow && head.waiter.conn instanceof PushConn
+    const pushed = sentNow && head.waiter.conn.async === true
     const live = sentNow && !pushed
     const listening = this.liveWaiters(peer).length ? [] : this.othersListening([peer.name, req.from])
     this.reply(conn, { type: 'sent', id: msg.id, live, pushed, queued: q.length, listening })
   }
 
-  private ack(name: string, id: string): void {
+  private ack(as: string, id: string): void {
+    // Ids are unique, so an ack under a name that was renamed or moved since still finds its message.
+    const name = this.inflight.get(as)?.id === id ? as : [...this.inflight].find(([, h]) => h.id === id)?.[0]
+    if (name === undefined) return
     const held = this.inflight.get(name)
     if (held?.id !== id) return
     const q = this.queue(name)
@@ -438,8 +459,9 @@ export class Hub {
     for (const w of [...this.waitersOf(peer.name)]) {
       if (w.session === session) continue
       // Let a waiter finish the message it holds. ack evicts it.
-      if (this.inflight.get(peer.name)?.waiter === w) w.supersededBy = session
-      else this.evict(w, { type: 'superseded', by: session })
+      // Name the new holder by tag: a raw session id is what the sender check trusts.
+      if (this.inflight.get(peer.name)?.waiter === w) w.supersededBy = sessionTag(session)
+      else this.evict(w, { type: 'superseded', by: sessionTag(session) })
     }
   }
 
@@ -462,8 +484,8 @@ export class Hub {
 
   /** Tells a waiter why it is done and closes it. */
   private evict(waiter: Waiter, reply: Reply): void {
-    if (reply.type === 'superseded' && waiter.conn instanceof PushConn) {
-      waiter.conn.notice(
+    if (reply.type === 'superseded') {
+      waiter.conn.notice?.(
         waiter.name,
         `Another session took over "${waiter.name}". This session no longer receives on agent-bridge. To rejoin, ask the user, then join again under another name.`,
       )

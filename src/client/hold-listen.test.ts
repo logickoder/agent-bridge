@@ -63,3 +63,20 @@ describe('holdListen', () => {
     expect(l.errors).toEqual([])
   })
 })
+
+describe('streamListen', () => {
+  it('writes each message and ends once on takeover', async () => {
+    const { streamListen } = await import('./index.js')
+    vi.useFakeTimers()
+    const sock = new FakeSocket()
+    const written: string[] = []
+    const ends: unknown[] = []
+    streamListen(req, { write: async m => void written.push(m.text), end: e => void ends.push(e) }, async () => sock)
+    await vi.advanceTimersByTimeAsync(0)
+    sock.reply({ type: 'msg', msg })
+    sock.reply({ type: 'superseded', by: 'abc123' })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(written).toEqual(['hi'])
+    expect(ends).toEqual([{ type: 'superseded', by: 'abc123' }])
+  })
+})

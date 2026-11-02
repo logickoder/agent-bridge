@@ -1,5 +1,6 @@
-import { holdListen, resolveName } from '../../../client/index.js'
+import { resolveName, streamListen } from '../../../client/index.js'
 import { peerName } from '../../../lib/args.js'
+import { endText } from '../../../format.js'
 import { toError } from '../../../lib/errors.js'
 import { logger } from '../../../lib/log.js'
 import { createMcpHandler, serveStdio } from '../../../mcp/server.js'
@@ -43,20 +44,15 @@ export async function serveClaudeMcp(identity: Identity | undefined, env: NodeJS
       // that session subscribes. Others (health checks, plain sessions) would ack and drop messages.
       onInitialized: () => {
         if (!self) return
-        holdListen(
+        streamListen(
           { op: 'listen', as: self, kind: 'claude', session, stream: true },
           {
-            onMessage: async msg => {
+            write: async msg => {
               mcp.notify('notifications/claude/channel', { content: msg.text, meta: { from: msg.from, id: msg.id, ts: msg.ts } })
             },
-            onControl: reply => {
-              if (reply.type === 'superseded') log(`another Claude session took over "${self}". This one only sends now.`)
-              else if (reply.type === 'stopped') log(`"${self}" left the bridge. This session only sends now.`)
-              else if (reply.type === 'error') log(reply.message)
-              return true
-            },
-            onError: err => log(err.message),
-            onDisconnect: err => log(`daemon connection lost (${err.message}). Reconnecting.`),
+            // A channel session keeps running after its stream ends; it can still send.
+            end: e => log(e.type === 'error' ? e.message : `${endText(e)} This session only sends now.`),
+            disconnect: err => log(`daemon connection lost (${err.message}). Reconnecting.`),
           },
         )
       },

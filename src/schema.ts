@@ -96,3 +96,5 @@ export type PeerStatus = z.infer<typeof PeerStatus>
 export type Request = z.infer<typeof Request>
 export type Reply = z.infer<typeof Reply>
 export type ReplyOf<T extends Reply['type']> = Extract<Reply, { type: T }>
+/** How a stream listener ended: taken over, left, or failed. */
+export type StreamEnd = ReplyOf<'superseded' | 'stopped' | 'error'>

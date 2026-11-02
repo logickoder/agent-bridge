@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { readStdin } from '../../lib/wire.js'
 
 /**
  * Plugin PreToolUse hook for Bash. In bypass-permissions mode Claude holds socket messages for approval, and the
@@ -28,9 +29,6 @@ export function guardDecision(stdin: string): object | undefined {
 
 /** Reads the hook input, prints a decision or nothing. Never blocks anything else. */
 export async function runGuard(): Promise<void> {
-  let buf = ''
-  process.stdin.setEncoding('utf8')
-  for await (const chunk of process.stdin) buf += String(chunk)
-  const out = guardDecision(buf)
+  const out = guardDecision(await readStdin())
   if (out) process.stdout.write(`${JSON.stringify(out)}\n`)
 }

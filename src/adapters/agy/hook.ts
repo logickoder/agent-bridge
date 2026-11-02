@@ -4,7 +4,7 @@ import { request } from '../../client/index.js'
 import { formatDrained } from './format.js'
 import { toError } from '../../lib/errors.js'
 import { logger } from '../../lib/log.js'
-import { writeLine } from '../../lib/wire.js'
+import { readStdin, writeLine } from '../../lib/wire.js'
 
 /** Hard cap so a slow or missing daemon never stalls agy. */
 const HOOK_BUDGET_MS = 1500
@@ -15,13 +15,6 @@ const REJOIN =
   '[agent-bridge] Direct delivery to this session is off (the bridge daemon restarted). Run `agent-bridge join --kind agy` in the foreground to restore it, then carry on with what the user asked.'
 
 const HookInput = z.object({ conversationId: z.string().min(1).optional() }).loose()
-
-async function readStdin(): Promise<string> {
-  let buf = ''
-  process.stdin.setEncoding('utf8')
-  for await (const chunk of process.stdin) buf += String(chunk)
-  return buf
-}
 
 /** Messages shown to this session, and how to remove them from the queue once they are printed. */
 export interface Drained {

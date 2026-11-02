@@ -72,3 +72,27 @@ describe('formatPeers', () => {
     expect(formatPeers([], {})).toBe('No peers yet. Peers appear here once they join the bridge.')
   })
 })
+
+describe('shared message helpers', () => {
+  const m = { id: 'm1', from: 'b-agy', to: 'a-claude', text: 'x', ts: '2026-11-02T00:00:00.000Z' }
+
+  it('builds one header, with the timestamp on request', async () => {
+    const { messageHeader } = await import('./format.js')
+    expect(messageHeader({ ...m, verified: true })).toBe('[agent-bridge] Message from b-agy to a-claude (id m1)')
+    expect(messageHeader(m, { ts: true })).toBe('[agent-bridge] Message from b-agy (unverified) to a-claude (id m1, 2026-11-02T00:00:00.000Z)')
+  })
+
+  it('maps stream ends to wording and exit codes', async () => {
+    const { endCode, endText } = await import('./format.js')
+    expect(endText({ type: 'superseded', by: 'abc' })).toMatch(/another session \(abc\) took over/)
+    expect(endText({ type: 'stopped' })).toMatch(/left the bridge/)
+    expect(endText({ type: 'error', message: 'boom' })).toBe('boom')
+    expect([endCode({ type: 'superseded', by: 'a' }), endCode({ type: 'stopped' }), endCode({ type: 'error', message: 'x' })]).toEqual([0, 0, 1])
+  })
+
+  it('gives bridge notices no reply hint', async () => {
+    const { replyOr } = await import('./format.js')
+    expect(replyOr({ from: 'agent-bridge' }, 'reply!')).toMatch(/no reply needed/)
+    expect(replyOr({ from: 'b-agy' }, 'reply!')).toBe('reply!')
+  })
+})

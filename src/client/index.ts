@@ -5,7 +5,7 @@ import type { Duplex } from 'node:stream'
 import { isDaemonDown, toError } from '../lib/errors.js'
 import { CLI, DAEMON_LOG, ensureHome, SOCK } from '../paths.js'
 import type { Identity } from '../names.js'
-import { Reply, type Message, type PeerKind, type Request, type ReplyOf } from '../schema.js'
+import { Reply, type Message, type StreamEnd, type PeerKind, type Request, type ReplyOf } from '../schema.js'
 import { onLines, writeLine } from '../lib/wire.js'
 
 const RETRY_MS = 50
@@ -194,4 +194,33 @@ export function holdListen(
     writeLine(s, req)
   }
   void arm()
+}
+
+export interface StreamHandlers {
+  /** Resolve once the message is written; the daemon then drops it. */
+  write: (msg: Message) => Promise<void>
+  /** Called once when the stream ends: taken over, left, or failed. */
+  end: (e: StreamEnd) => void
+  /** The daemon connection dropped; a reconnect is already scheduled. */
+  disconnect?: (err: Error) => void
+}
+
+/**
+ * A listener that writes each message and ends on takeover, leave or error. Every adapter's listener uses it:
+ * agy's one-shot listen, the Claude monitor and channel, the opencode stream.
+ */
+export function streamListen(req: Extract<Request, { op: 'listen' }>, h: StreamHandlers, connectFn?: () => Promise<Duplex>): void {
+  holdListen(
+    req,
+    {
+    onMessage: h.write,
+    onControl: reply => {
+      if (reply.type === 'superseded' || reply.type === 'stopped' || reply.type === 'error') h.end(reply)
+      return true
+    },
+    onError: err => h.end({ type: 'error', message: err.message }),
+    ...(h.disconnect ? { onDisconnect: h.disconnect } : {}),
+    },
+    connectFn,
+  )
 }

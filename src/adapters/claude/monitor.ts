@@ -1,5 +1,5 @@
-import { holdListen } from '../../client/index.js'
-import { toError } from '../../lib/errors.js'
+import { streamListen } from '../../client/index.js'
+import { endCode, endText } from '../../format.js'
 import { monitorLine, monitorNotice } from './format.js'
 import { SESSION_ENV } from './names.js'
 
@@ -15,20 +15,11 @@ const finish = (text: string, code: number): void => {
 export function runMonitor(env: NodeJS.ProcessEnv = process.env): void {
   const session = env[SESSION_ENV]
   if (!session) return finish(`no ${SESSION_ENV} in the monitor's environment. This session cannot receive.`, 1)
-  holdListen(
+  streamListen(
     { op: 'listen', kind: 'claude', session, stream: true },
     {
-      onMessage: msg =>
-        new Promise(resolve => {
-          process.stdout.write(`${monitorLine(msg)}\n`, () => resolve())
-        }),
-      onControl: reply => {
-        if (reply.type === 'superseded') finish(`another session (${reply.by}) took over this name. This session no longer receives.`, 0)
-        else if (reply.type === 'stopped') finish('this session left the bridge. It no longer receives.', 0)
-        else if (reply.type === 'error') finish(reply.message, 1)
-        return true
-      },
-      onError: err => finish(toError(err).message, 1),
+      write: msg => new Promise(resolve => process.stdout.write(`${monitorLine(msg)}\n`, () => resolve())),
+      end: e => finish(endText(e), endCode(e)),
     },
   )
 }
