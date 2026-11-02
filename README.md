@@ -13,11 +13,11 @@ node dist/cli.js install          # once per machine
 Then:
 
 ```sh
-claude-bridge                     # Claude session, peer "claude"
+claude-bridge                     # Claude session, auto name <folder>-claude
 claude-bridge --as reviewer       # or pick a name
 ```
 
-In agy, type `/bridge` (peer `agy`) or `/bridge planner`. Ask any session to message another by name. `/bridge off` in agy leaves. `agent-bridge uninstall` removes everything.
+In agy, type `/bridge` (auto name `<folder>-agy`) or `/bridge planner`. Ask any session to message another by name. `/bridge off` in agy leaves. `agent-bridge uninstall` removes everything.
 
 Requires Node 22+ and pnpm.
 
@@ -39,7 +39,7 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 
 | Kind | Wake | Identity |
 |---|---|---|
-| `claude` | Channel push into the live session (`notifications/claude/channel`) | `claude-bridge --as <name>` sets `AGENT_BRIDGE_PEER` for the MCP server |
+| `claude` | Channel push into the live session (`notifications/claude/channel`) | `CLAUDE_CODE_SESSION_ID`, which Claude sets for MCP servers. `claude-bridge` passes the name (`--as`) or the auto-name base to the server |
 | `agy` | A background `agent-bridge listen` exits when a message arrives, which wakes agy. A PreInvocation hook injects queued messages as a fallback | `ANTIGRAVITY_CONVERSATION_ID`, set by agy in `run_command`'s environment and sent to hooks as `conversationId` |
 
 ### Delivery rules
@@ -49,6 +49,15 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 - The agy hook removes messages only after it has printed them. If it hits its time cap first, they stay queued. A failed ack shows them again next turn: a duplicate, never a loss.
 - `send` reports "Delivered live" only when the message went out at once. One queued behind a message in flight reports "Queued".
 - One daemon at a time, enforced by a lock file. Clients start it on demand.
+
+### Names
+
+- **Auto names, the way Claude names sessions.** Without a name, a session gets `<folder>-<kind>`, e.g. `bankstract-claude` and `bankstract-agy`. The daemon assigns it on `claim`, so two sessions starting at once never collide.
+- **Never reused while held.** A new session gets the lowest free `-2`, `-3`, even when the holder is offline. The same session, including a resumed one, always gets the same name.
+- **Pruned after a day.** A peer with nothing queued and no listen, ack or drain for 24 hours is dropped, and its name is free again.
+- **Explicit names are roles.** `claude-bridge --as reviewer` or `/bridge planner` take the name, superseding any other session that held it.
+- **Finding your name.** Claude: the MCP instructions say "You are peer ...", and `peers` marks it "you". agy: `agent-bridge join` prints it. Any agent shell: `agent-bridge whoami`. (In Claude, the session id can change during a long session, so `whoami` there can miss; ask Claude instead.)
+- **Names change across restarts.** A send to a peer that is not listening says who is, so the sender can redirect.
 
 ### Binding
 
@@ -85,11 +94,13 @@ Environment overrides: `AGENT_BRIDGE_HOME` (daemon state), `AGY_CONFIG_DIR`, `AG
 |---|---|
 | `agent-bridge install` / `uninstall` | Set up or remove everything above |
 | `agent-bridge status` | Peers, kinds, bound sessions, online, queued |
+| `agent-bridge whoami` | This session's peer name, from the agent's session id |
 | `agent-bridge send [--as me] <to> <text>` | Send from the shell (sender `shell` by default) |
 | `agent-bridge leave <name>` | Unbind a peer and stop its listeners |
 | `agent-bridge restart` | Stop the daemon. The next client starts it |
 | `claude-bridge [--as name] [claude args]` | Launch Claude Code on the bridge |
-| `agent-bridge listen [--as name]` | agy: wait for one message, print it, exit |
+| `agent-bridge join [name]` | agy: settle this session's name (auto by default) and print it |
+| `agent-bridge listen --as <name>` | agy: wait for one message, print it, exit |
 | `agent-bridge mcp <kind>` | MCP server for one agent kind (`claude`, `agy`) |
 | `agent-bridge agy-hook` | agy PreInvocation hook |
 | `agent-bridge daemon` | Hub process |

@@ -51,6 +51,9 @@ Target: agy (Antigravity CLI) 1.4.12, Claude Code 2.1.316, macOS.
 | agy passes `as` on each send | agy's MCP server process has no session id. The `/bridge` skill and every message tell agy its name |
 | Hub is pure, store injected | Delivery and binding rules are unit-tested without sockets or disk |
 | Strict TypeScript, zod at boundaries, tsc to `dist/` | The code grew past what one untyped file holds. Follows the owner's TypeScript rules |
+| Auto names `<folder>-<kind>[-n]`, never reused while held | Same model as Claude's own session names. No takeover or "is it still active" guesswork for defaults. The daemon assigns names (`claim`) so concurrent starts cannot collide. Explicit names keep takeover for stable roles |
+| Prune idle peers after 24h | Auto names would otherwise pile up. Only peers with an empty queue and no listener are dropped |
+| Claude keyed on `CLAUDE_CODE_SESSION_ID` | Claude sets it for MCP servers (checked in the process env). A resumed session keeps its name. Seen to differ between servers of one long-lived session, so `whoami` from Claude's shell can miss |
 | Single-instance lock file | Bridge finding 1. The pid goes into a temp file that is hard-linked into place, so the lock never exists empty. A stale lock is renamed aside and checked before takeover. An empty lock is refused until it is 5s old |
 | Hook drain is acked after print | The hook's 1.5s cap or agy's 3s kill could fire between drain and print. Drain no longer removes; `ack-drained` does |
 | Listener retries every failure to connect | A failed connect or a socket error (ECONNRESET) used to end the listener. agy then woke for nothing, and Claude stopped receiving until restart |
@@ -106,3 +109,5 @@ Steps:
 5. agy to Claude through a live `claude-bridge` session.
 6. Two agy sessions under different names at once, live.
 7. Does `/bridge` invoke the skill as a slash command, from `~/.gemini/config/skills/`?
+8. Is the MCP server and `run_command` cwd the project folder in both agents, so auto names match the folder?
+9. Does `claude --resume` keep `CLAUDE_CODE_SESSION_ID`, and so the auto name?

@@ -8,18 +8,20 @@
 | `src/install.ts` | Links `agent-bridge`, then runs each adapter's install or uninstall |
 | `src/paths.ts` | State locations (`~/.agent-bridge`) and `ensureHome` |
 | `src/schema.ts` | Zod schemas for every boundary: socket requests and replies, messages, peers |
+| `src/names.ts` | Auto peer names: `<folder>-<kind>` base, next free suffix. Pure |
 | `src/format.ts` | Send results, shared by the tools and the CLI. Agent-specific wording lives in the adapter (`agy/format.ts`) |
 | `src/daemon/hub.ts` | Routing state machine. Pure apart from an injected `Store`. All delivery and binding rules live here |
 | `src/daemon/server.ts` | Unix socket server around `Hub` |
 | `src/daemon/lock.ts` | Single-instance lock: atomic create, stale takeover |
 | `src/daemon/store.ts` | Disk persistence for peers and queues. A corrupt file is moved aside |
 | `src/client/index.ts` | Connect (starting the daemon when needed), request/reply, held listen with reconnect, `stopDaemon` |
+| `src/mcp/identity.ts` | Server name and version. Tiny, so adapter indexes can import it |
 | `src/mcp/server.ts` | Minimal MCP stdio server and `defineTool` (zod args to JSON schema) |
 | `src/mcp/tools.ts` | The `send` and `peers` tools, shared by every agent kind |
 | `src/lib/` | Generic helpers, no bridge logic: `errors` (errno codes, `toError`, `isDaemonDown`), `json-file` (validated read, atomic write), `log` (tagged stderr), `wire` (JSON lines), `args`, `config` (other tools' config and PATH links) |
 | `src/adapters/types.ts` | The `Adapter` interface every agent kind implements |
 | `src/adapters/index.ts` | `ADAPTERS` registry, typed `Record<PeerKind, Adapter>` |
-| `src/adapters/<kind>/` | Everything agent-specific. `index.ts` exports the adapter and is the folder's only entry point. The rest is split by concern: `mcp.ts`, `install.ts`, `names.ts` (constants), and the wake path (`agy/listen.ts`, `agy/hook.ts`, `agy/format.ts`, `claude/launch.ts`) |
+| `src/adapters/<kind>/` | Everything agent-specific. `index.ts` exports the adapter and is the folder's only entry point. The rest is split by concern: `mcp.ts`, `install.ts`, `names.ts` (constants), and the wake path (`agy/join.ts`, `agy/listen.ts`, `agy/hook.ts`, `agy/format.ts`, `claude/launch.ts`) |
 | `src/adapters/agy/skill/` | The agy `/bridge` skill, copied by install |
 | `test/` | Tests that touch real files, sockets or processes. `e2e.test.ts` runs against `dist/cli.js` |
 
