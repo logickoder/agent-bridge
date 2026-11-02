@@ -44,4 +44,10 @@ describe('deliverWith', () => {
     const run: Run = async () => ({ code: 1, stdout: '' })
     await expect(deliverWith(run)(endpoint, msg)).rejects.toThrow(/exit 1/)
   })
+
+  it('refuses to run anything but an executable named agy', async () => {
+    const run: Run = async () => ({ code: 0, stdout: '{}' })
+    await expect(deliverWith(run)({ ...endpoint, agy: '/tmp/evil' }, msg)).rejects.toThrow(/only runs agy/)
+    await expect(deliverWith(run)({ ...endpoint, agy: 'agy' }, msg)).rejects.toThrow(/absolute path/)
+  })
 })

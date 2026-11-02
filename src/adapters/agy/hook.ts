@@ -11,6 +11,9 @@ const HOOK_BUDGET_MS = 1500
 
 const log = logger('hook')
 
+const REJOIN =
+  '[agent-bridge] Direct delivery to this session is off (the bridge daemon restarted). Run `agent-bridge join --kind agy` in the foreground to restore it, then carry on with what the user asked.'
+
 const HookInput = z.object({ conversationId: z.string().min(1).optional() }).loose()
 
 async function readStdin(): Promise<string> {
@@ -23,6 +26,8 @@ async function readStdin(): Promise<string> {
 /** Messages shown to this session, and how to remove them from the queue once they are printed. */
 export interface Drained {
   msgs: Message[]
+  /** The daemon has no push endpoint for this session. Ask agy to run join again. */
+  rejoin: boolean
   ack: () => Promise<void>
 }
 
@@ -48,8 +53,10 @@ export async function hookOutput(stdin: string, drain: (session: string) => Prom
     log(`drain failed: ${toError(err).message}`)
     return undefined
   })
-  if (!d?.msgs.length) return { out: {} }
-  return { out: { injectSteps: [{ userMessage: formatDrained(d.msgs) }] }, ack: d.ack }
+  if (!d) return { out: {} }
+  const parts = [d.msgs.length ? formatDrained(d.msgs) : '', d.rejoin ? REJOIN : ''].filter(Boolean)
+  if (!parts.length) return { out: {} }
+  return { out: { injectSteps: [{ userMessage: parts.join('\n\n') }] }, ...(d.msgs.length ? { ack: d.ack } : {}) }
 }
 
 /**
@@ -65,9 +72,9 @@ export async function runHook(): Promise<void> {
   }
   setTimeout(() => void print({}).then(() => process.exit(0)), HOOK_BUDGET_MS).unref()
   const { out, ack } = await hookOutput(await readStdin(), async session => {
-    const { msgs } = await request({ op: 'drain', session }, 'drained', { spawnDaemon: false })
+    const { msgs, rejoin } = await request({ op: 'drain', session }, 'drained', { spawnDaemon: false })
     const ids = msgs.map(m => m.id)
-    return { msgs, ack: () => request({ op: 'ack-drained', session, ids }, 'ok', { spawnDaemon: false }).then(() => {}) }
+    return { msgs, rejoin, ack: () => request({ op: 'ack-drained', session, ids }, 'ok', { spawnDaemon: false }).then(() => {}) }
   })
   if (printed) return process.exit(0)
   await print(out)

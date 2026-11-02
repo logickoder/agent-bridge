@@ -99,6 +99,8 @@ export class Hub {
   private readonly pending = new Map<Conn, ListenRequest>()
   /** One push endpoint per session, in memory only. */
   private readonly pushers = new Map<string, PushConn>()
+  /** Sessions already asked to rejoin this daemon run, so the hint is not repeated every turn. */
+  private readonly rejoinAsked = new Set<string>()
   /** lastSeen as last written to disk, per peer. Throttles touch() against what is stored, not in memory. */
   private readonly savedSeen = new Map<string, number>()
 
@@ -126,7 +128,7 @@ export class Hub {
         return this.ack(req.as, req.id)
       case 'drain':
         this.touchSession(req.session)
-        return this.reply(conn, { type: 'drained', msgs: this.drain(req.session) })
+        return this.reply(conn, { type: 'drained', msgs: this.drain(req.session), rejoin: this.needsRejoin(req.session) })
       case 'ack-drained':
         this.ackDrained(req.session, req.ids)
         return this.reply(conn, { type: 'ok' })
@@ -202,6 +204,13 @@ export class Hub {
     })
     this.pushers.set(session, conn)
     this.listen({ op: 'listen', kind, session, stream: true }, conn)
+  }
+
+  /** True once for a bound session without a push endpoint: it should run `join` again to restore direct delivery. */
+  private needsRejoin(session: string): boolean {
+    if (this.pushers.has(session) || this.rejoinAsked.has(session) || !this.boundTo(session).length) return false
+    this.rejoinAsked.add(session)
+    return true
   }
 
   private dropPusher(conn: PushConn): void {

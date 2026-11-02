@@ -63,6 +63,9 @@ export const deliverWith =
   (run: Run) =>
   async (endpoint: Record<string, string>, msg: Message): Promise<void> => {
     const ep = Endpoint.parse(endpoint)
+    // The endpoint comes over the socket. Run only an absolute path to an executable named agy.
+    if (!path.isAbsolute(ep.agy)) throw new Error(`push endpoint's agy must be an absolute path, got "${ep.agy}".`)
+    if (path.basename(ep.agy) !== 'agy') throw new Error(`push delivery only runs agy, not "${ep.agy}".`)
     const env = { ...process.env, ANTIGRAVITY_LS_ADDRESS: ep.address, ANTIGRAVITY_CSRF_TOKEN: ep.token }
     const { code, stdout } = await run(ep.agy, ['agentapi', 'send-message', ep.conversation, formatPushed(msg)], env)
     if (code !== 0) throw new Error(`agy agentapi send-message failed: exit ${code}.`)

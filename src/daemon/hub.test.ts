@@ -192,7 +192,7 @@ describe('binding', () => {
     const l = listen('agy', 'agy', 's1')
     send('agy', 'held')
     send('agy', 'queued')
-    expect(call({ op: 'drain', session: 'other' }).last()).toEqual({ type: 'drained', msgs: [] })
+    expect(call({ op: 'drain', session: 'other' }).last()).toEqual({ type: 'drained', msgs: [], rejoin: false })
     const r = call({ op: 'drain', session: 's1' }).last()
     expect(r?.type === 'drained' && r.msgs.map(m => m.text)).toEqual(['queued'])
     expect(texts(l)).toEqual(['held'])
@@ -554,5 +554,24 @@ describe('push endpoints', () => {
     claim('/x/b', 'agy', 's1')
     call({ op: 'push', kind: 'agy', session: 's1', endpoint: { token: 'secret' } })
     expect(JSON.stringify(hub.status())).not.toContain('secret')
+  })
+})
+
+describe('rejoin hint', () => {
+  const drain = (call: ReturnType<typeof setup>['call'], session: string) => call({ op: 'drain', session }).last()
+
+  it('asks a bound session without a push endpoint to rejoin, once per daemon run', () => {
+    const { claim, call } = setup()
+    claim('/x/b', 'agy', 's1')
+    expect(drain(call, 's1')).toMatchObject({ type: 'drained', rejoin: true })
+    expect(drain(call, 's1')).toMatchObject({ type: 'drained', rejoin: false })
+  })
+
+  it('does not ask a session that has a push endpoint, or one bound to nothing', () => {
+    const { claim, call } = setup(memoryStore(), () => {}, async () => {})
+    claim('/x/b', 'agy', 's1')
+    call({ op: 'push', kind: 'agy', session: 's1', endpoint: {} })
+    expect(drain(call, 's1')).toMatchObject({ rejoin: false })
+    expect(drain(call, 'nobody')).toMatchObject({ rejoin: false })
   })
 })

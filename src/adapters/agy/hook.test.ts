@@ -3,7 +3,7 @@ import type { Message } from '../../schema.js'
 import { hookOutput, type Drained } from './hook.js'
 
 const msg = (id: string): Message => ({ id, from: 'claude', to: 'agy', text: `text ${id}`, ts: '2026-11-02T00:00:00.000Z' })
-const drained = (msgs: Message[]): Drained => ({ msgs, ack: vi.fn(async () => {}) })
+const drained = (msgs: Message[], rejoin = false): Drained => ({ msgs, rejoin, ack: vi.fn(async () => {}) })
 
 describe('hookOutput', () => {
   it('returns {} without a conversationId, without asking the daemon', async () => {
@@ -38,5 +38,16 @@ describe('hookOutput', () => {
     expect(await hookOutput('{"conversationId":"c1"}', async () => Promise.reject(new Error('down')))).toEqual({ out: {} })
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining('drain failed'))
     stderr.mockRestore()
+  })
+
+  it('asks agy to rejoin when the daemon lost its push endpoint, even with nothing queued', async () => {
+    const r = await hookOutput('{"conversationId":"c1"}', async () => drained([], true))
+    expect(r.out).toEqual({ injectSteps: [{ userMessage: expect.stringMatching(/agent-bridge join --kind agy/) }] })
+    expect(r.ack).toBeUndefined()
+  })
+
+  it('adds the rejoin line after queued messages', async () => {
+    const r = await hookOutput('{"conversationId":"c1"}', async () => drained([msg('m1')], true))
+    expect(JSON.stringify(r.out)).toMatch(/text m1[\s\S]*agent-bridge join --kind agy/)
   })
 })
