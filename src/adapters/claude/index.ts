@@ -2,10 +2,11 @@ import type { Adapter } from '../types.js'
 import { SESSION_ENV } from './names.js'
 
 /**
- * Claude Code adapter.
- * Wake, default: the agent-bridge plugin's monitor (`agent-bridge monitor`), started by /bridge. Each message
- * is one line, which Claude Code delivers as a monitor event that wakes an idle session.
- * Wake, opt-in: a channel push in a session launched with `agent-bridge claude`.
+ * Claude Code adapter. Three ways to receive; the user picks:
+ * - socket (default): `/bridge` runs `join`, which registers the session's inbox socket. The daemon posts each
+ *   message there; Claude shows it as a message from another session and an idle session wakes. socket.ts.
+ * - monitor: `/bridge-monitor` runs `join --no-push` and starts the plugin monitor, one line per message. monitor.ts.
+ * - channel: launch with `agent-bridge claude`; a channel push into the session. channel/.
  * Identity: CLAUDE_CODE_SESSION_ID. `join --kind claude` binds the name: the one given, or `<folder>-claude[-n]`.
  */
 
@@ -13,9 +14,11 @@ export const claude: Adapter = {
   kind: 'claude',
   joinHint: 'Claude: type `/bridge [name]` (or `agent-bridge claude [--as name]` for a channel).',
   sessionEnv: SESSION_ENV,
-  joined: async name => (await import('./format.js')).joinedText(name),
+  joined: async (name, pushed) => (await import('./format.js')).joinedText(name, pushed),
+  pushEndpoint: async env => (await import('./socket.js')).endpointFromEnv(env),
+  deliver: async (endpoint, msg) => (await import('./socket.js')).deliver(endpoint, msg),
   serveMcp: async () => {
-    const { identityFromEnv, serveClaudeMcp } = await import('./mcp.js')
+    const { identityFromEnv, serveClaudeMcp } = await import('./channel/mcp.js')
     await serveClaudeMcp(identityFromEnv(process.env))
   },
   commands: {
@@ -25,7 +28,7 @@ export const claude: Adapter = {
     },
     claude: {
       usage: 'claude [--as name] [args...]   launch Claude Code with a channel instead of the plugin monitor',
-      run: async args => (await import('./launch.js')).launchClaude(args),
+      run: async args => (await import('./channel/launch.js')).launchClaude(args),
     },
   },
   install: async ctx => (await import('./install.js')).install(ctx),

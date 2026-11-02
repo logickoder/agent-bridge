@@ -11,7 +11,11 @@ import { onLines } from '../src/lib/wire.js'
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const CLI = path.join(REPO, 'dist', 'cli.js')
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'ab-'))
-const env = { ...process.env, AGENT_BRIDGE_HOME: HOME }
+// Strip the real agent sessions this suite may run inside, so no test ever pushes into a live Claude or agy session.
+const inherited = Object.fromEntries(
+  Object.entries(process.env).filter(([k]) => !k.startsWith('CLAUDE_CODE_') && !k.startsWith('ANTIGRAVITY_')),
+)
+const env = { ...inherited, AGENT_BRIDGE_HOME: HOME }
 const procs: ChildProcessWithoutNullStreams[] = []
 
 interface Proc {
@@ -230,6 +234,37 @@ describe('auto names', () => {
     expect(run(['send', 'agent-bridge-agy', 'hi'])).toMatch(/Listening now: .*agent-bridge-agy-2/)
     run(['send', 'agent-bridge-agy-2', 'done'])
     await l.exited()
+  })
+})
+
+describe('claude socket', () => {
+  it('join registers the inbox socket and the daemon posts each message as a peer message line', async () => {
+    // A stand-in for a Claude session's inbox socket. Never the real one: the suite strips CLAUDE_CODE_* from env.
+    const sockPath = path.join(HOME, 'inbox.sock')
+    const lines: string[] = []
+    const server = net.createServer(c => {
+      let buf = ''
+      c.on('data', (d: Buffer) => {
+        buf += d.toString()
+      })
+      c.on('end', () => lines.push(...buf.trim().split('\n')))
+    })
+    await new Promise<void>(r => server.listen(sockPath, r))
+    const senv = { CLAUDE_CODE_SESSION_ID: 'sock-1', CLAUDE_CODE_MESSAGING_SOCKET: sockPath }
+    expect(run(['join', '--kind', 'claude', 'sock-claude'], senv)).toMatch(/arrive in this session directly/)
+    run(['send', 'sock-claude', 'over the socket'])
+    await until(() => lines.length > 0, 'socket line')
+    const line = JSON.parse(lines[0] ?? '') as { type: string; from: string; message: { content: string } }
+    expect(line).toMatchObject({ type: 'user', from: 'agent-bridge:shell' })
+    expect(line.message.content).toContain('over the socket')
+    await until(() => peer('sock-claude')?.queued === 0, 'socket push acked')
+    server.close()
+  })
+
+  it('--no-push keeps a session on listening, for monitor mode', () => {
+    expect(run(['join', '--kind', 'claude', '--no-push', 'mon-only'], { CLAUDE_CODE_SESSION_ID: 'sock-2', CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/never.sock' })).toMatch(
+      /monitor events/,
+    )
   })
 })
 

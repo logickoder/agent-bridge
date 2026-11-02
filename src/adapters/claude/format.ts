@@ -9,10 +9,17 @@ export function monitorLine(m: Message): string {
   return `[agent-bridge] Message from ${m.from} to ${m.to} (id ${m.id}): ${JSON.stringify(m.text)} Reply with: ${sendCommand(m.to, m.from)}`
 }
 
+/** What the inbox socket delivers. Claude shows it as a message from another session. */
+export function socketText(m: Message): string {
+  return `[agent-bridge] Message from ${m.from} to ${m.to} (id ${m.id}):\n${m.text}\n\nReply with: ${sendCommand(m.to, m.from)}`
+}
+
 /** What `join` prints for Claude after the name. */
-export const joinedText = (name: string): string =>
+export const joinedText = (name: string, pushed: boolean): string =>
   [
-    'Messages from peers arrive as monitor events from the agent-bridge monitor.',
+    pushed
+      ? 'Messages from peers arrive in this session directly, as messages from another session.'
+      : 'Messages from peers arrive as monitor events from the agent-bridge monitor.',
     `Send or reply with: ${sendCommand(name, '<peer>')}. See peers with \`agent-bridge status\`.`,
   ].join('\n')
 

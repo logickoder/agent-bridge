@@ -1,11 +1,11 @@
-import { holdListen, resolveName } from '../../client/index.js'
-import { peerName } from '../../lib/args.js'
-import { toError } from '../../lib/errors.js'
-import { logger } from '../../lib/log.js'
-import { createMcpHandler, serveStdio } from '../../mcp/server.js'
-import { bridgeTools } from '../../mcp/tools.js'
-import type { Identity } from '../../names.js'
-import { FOLDER_ENV, PEER_ENV, SESSION_ENV } from './names.js'
+import { holdListen, resolveName } from '../../../client/index.js'
+import { peerName } from '../../../lib/args.js'
+import { toError } from '../../../lib/errors.js'
+import { logger } from '../../../lib/log.js'
+import { createMcpHandler, serveStdio } from '../../../mcp/server.js'
+import { bridgeTools } from '../../../mcp/tools.js'
+import type { Identity } from '../../../names.js'
+import { FOLDER_ENV, PEER_ENV, SESSION_ENV } from '../names.js'
 
 function instructions(self: string): string {
   return [

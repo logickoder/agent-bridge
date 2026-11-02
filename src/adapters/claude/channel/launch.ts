@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process'
-import { peerName } from '../../lib/args.js'
-import { logger } from '../../lib/log.js'
-import type { Identity } from '../../names.js'
-import { CLI } from '../../paths.js'
-import { FOLDER_ENV, PEER_ENV, SERVER } from './names.js'
+import { peerName } from '../../../lib/args.js'
+import { logger } from '../../../lib/log.js'
+import type { Identity } from '../../../names.js'
+import { CLI } from '../../../paths.js'
+import { FOLDER_ENV, PEER_ENV, SERVER } from '../names.js'
 
 /** Arguments for `claude`: load only this server, for this session only, with the channel enabled. */
 export function claudeArgs(identity: Identity, passthrough: string[], env: NodeJS.ProcessEnv = process.env): string[] {
