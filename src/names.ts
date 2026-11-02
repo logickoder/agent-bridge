@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { MAX_PEER_NAME, type PeerKind } from './schema.js'
 
@@ -35,3 +36,11 @@ export function inFamily(name: string, base: string): boolean {
 
 /** Who a session is on the bridge: a chosen name, or its folder for an auto name the daemon assigns. */
 export type Identity = { name: string } | { folder: string }
+
+/**
+ * What status shows instead of a session id. Session ids are what `send` checks a sender against, so the
+ * daemon never prints them. Not a secret, just not a copyable id.
+ */
+export function sessionTag(session: string): string {
+  return createHash('sha256').update(session).digest('hex').slice(0, 12)
+}

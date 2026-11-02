@@ -17,6 +17,8 @@ export const Message = z.object({
   to: PeerName,
   text: z.string(),
   ts: z.string(),
+  /** True when the daemon checked that the sending session holds `from`. Absent or false: unverified. */
+  verified: z.boolean().optional(),
 })
 
 /** A named participant. `session` is the agent session the name is bound to, if any. */
@@ -53,7 +55,8 @@ export const Request = z.discriminatedUnion('op', [
     kind: PeerKind,
     session: z.string().min(1),
   }).refine(r => (r.folder === undefined) !== (r.name === undefined), 'claim needs exactly one of `folder` or `name`.'),
-  z.object({ op: z.literal('send'), from: PeerName, to: PeerName, text: z.string().trim().min(1) }),
+  /** `sessions`: the sender's agent session ids. With them, `from` must be a name one of them holds. */
+  z.object({ op: z.literal('send'), from: PeerName, to: PeerName, text: z.string().trim().min(1), sessions: z.array(z.string().min(1)).optional() }),
   z.object({ op: z.literal('ack'), as: PeerName, id: z.string() }),
   z.object({ op: z.literal('drain'), session: z.string().min(1) }),
   z.object({ op: z.literal('ack-drained'), session: z.string().min(1), ids: z.array(z.string()) }),

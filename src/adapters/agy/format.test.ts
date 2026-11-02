@@ -8,7 +8,7 @@ describe('formatListened', () => {
   it('shows the message, how to reply, and how to re-arm with the right name', () => {
     const out = formatListened(msg({ to: 'reviewer' }))
     expect(out).toContain('hello')
-    expect(out).toContain('to "claude", as "reviewer"')
+    expect(out).toContain('agent-bridge send --as reviewer claude')
     expect(out).toContain('`agent-bridge listen --as reviewer`')
   })
 })

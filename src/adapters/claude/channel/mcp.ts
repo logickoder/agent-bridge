@@ -38,7 +38,7 @@ export async function serveClaudeMcp(identity: Identity | undefined, env: NodeJS
     createMcpHandler({
       instructions: self ? instructions(self) : unnamed,
       capabilities: { experimental: { 'claude/channel': {} } },
-      tools: bridgeTools(self ? { self } : { asHelp: 'your peer name' }),
+      tools: bridgeTools(self ? { self, sessions: [session] } : { asHelp: 'your peer name' }),
       // Claude never tells a server whether channels are on. Only `agent-bridge claude` sets the env vars, so only
       // that session subscribes. Others (health checks, plain sessions) would ack and drop messages.
       onInitialized: () => {

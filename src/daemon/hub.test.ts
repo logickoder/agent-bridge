@@ -587,3 +587,46 @@ describe('push next to another receiver', () => {
     })
   })
 })
+
+describe('sender verification', () => {
+  it('accepts a sender name held by the sending session, and marks it verified', () => {
+    const { claim, call, listen } = setup()
+    claim('/x/a', 'agy', 's1')
+    const l = listen('b', 'agy')
+    call({ op: 'send', from: 'a-agy', to: 'b', text: 'hi', sessions: ['s1'] })
+    const r = l.replies.find(x => x.type === 'msg')
+    expect(r?.type === 'msg' && r.msg.verified).toBe(true)
+  })
+
+  it('refuses a sender name the sending session does not hold', () => {
+    const { claim, call, listen } = setup()
+    claim('/x/a', 'agy', 's1')
+    listen('b', 'agy')
+    expect(call({ op: 'send', from: 'lead', to: 'b', text: 'hi', sessions: ['s1'] }).last()).toMatchObject({
+      type: 'error',
+      message: expect.stringMatching(/not this session's name/),
+    })
+  })
+
+  it('delivers a send without a session as unverified', () => {
+    const { call, listen } = setup()
+    const l = listen('b', 'agy')
+    call({ op: 'send', from: 'shell', to: 'b', text: 'hi' })
+    const r = l.replies.find(x => x.type === 'msg')
+    expect(r?.type === 'msg' && r.msg.verified).toBe(false)
+  })
+})
+
+describe('status redaction', () => {
+  it('shows a tag, not the raw session id, in the status reply', async () => {
+    const { sessionTag } = await import('../names.js')
+    const { claim, call } = setup()
+    claim('/x/b', 'agy', 'secret-session-id')
+    call({ op: 'leave', as: 'b-agy' })
+    claim('/x/c', 'agy', 'other-session')
+    const r = call({ op: 'status' }).last()
+    expect(JSON.stringify(r)).not.toContain('secret-session-id')
+    expect(JSON.stringify(r)).not.toContain('other-session')
+    expect(r?.type === 'status' && r.peers.find(p => p.name === 'c-agy')?.session).toBe(sessionTag('other-session'))
+  })
+})

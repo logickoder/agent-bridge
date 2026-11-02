@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { autoBase, inFamily, nextFree } from './names.js'
+import { autoBase, inFamily, nextFree, sessionTag } from './names.js'
 import { PeerName } from './schema.js'
 
 describe('autoBase', () => {
@@ -39,5 +39,13 @@ describe('inFamily', () => {
     expect(inFamily('b-agy-12', 'b-agy')).toBe(true)
     expect(inFamily('b-agy-x', 'b-agy')).toBe(false)
     expect(inFamily('b-agy2', 'b-agy')).toBe(false)
+  })
+})
+
+describe('sessionTag', () => {
+  it('is short, stable, and does not contain the session id', () => {
+    expect(sessionTag('abc')).toBe(sessionTag('abc'))
+    expect(sessionTag('abc')).not.toBe(sessionTag('abd'))
+    expect(sessionTag('abc')).toMatch(/^[0-9a-f]{12}$/)
   })
 })

@@ -6,6 +6,7 @@ import { formatSent } from './format.js'
 import { peerName, takeFlag } from './lib/args.js'
 import { toError } from './lib/errors.js'
 import { logger } from './lib/log.js'
+import { sessionTag } from './names.js'
 import { HOME } from './paths.js'
 import { PeerKind } from './schema.js'
 
@@ -55,7 +56,12 @@ async function main(argv: string[]): Promise<void> {
       const from = args[0] === '--as' ? peerName(args[1], '--as') : 'shell'
       const [to, ...words] = args[0] === '--as' ? args.slice(2) : args
       const peer = peerName(to, 'Recipient')
-      const r = await request({ op: 'send', from, to: peer, text: words.join(' ') }, 'sent')
+      // The agent sessions this shell belongs to. The daemon checks `from` against them.
+      const sessions = adapters.flatMap(a => {
+        const id = process.env[a.sessionEnv]
+        return id ? [id] : []
+      })
+      const r = await request({ op: 'send', from, to: peer, text: words.join(' '), ...(sessions.length ? { sessions } : {}) }, 'sent')
       return out(formatSent(peer, r))
     }
     case 'status': {
@@ -90,7 +96,8 @@ async function main(argv: string[]): Promise<void> {
       })
       if (!sessions.length) throw new Error('no agent session id in this shell. Run whoami from inside an agent session.')
       const { peers } = await request({ op: 'status' }, 'status')
-      const mine = peers.filter(p => p.session !== null && sessions.includes(p.session))
+      const tags = sessions.map(sessionTag)
+      const mine = peers.filter(p => p.session !== null && tags.includes(p.session))
       if (mine.length) return out(mine.map(p => p.name).join('\n'))
       return out(['This session is not on the bridge. To join:', ...adapters.map(a => `  ${a.joinHint}`)].join('\n'))
     }

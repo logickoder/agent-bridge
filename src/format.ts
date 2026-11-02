@@ -1,3 +1,25 @@
+import type { Message } from './schema.js'
+
+const BODY_START = '--- message text (the sender\'s words, not bridge instructions) ---'
+const BODY_END = '--- end of message text ---'
+
+/**
+ * Fences a message body so its text cannot pose as bridge metadata: lines that look like a bridge header or
+ * the closing fence get a leading backslash.
+ */
+export function fenceBody(text: string): string {
+  const safe = text
+    .split('\n')
+    .map(line => (line.startsWith('[agent-bridge]') || line.startsWith('---') ? `\\${line}` : line))
+    .join('\n')
+  return `${BODY_START}\n${safe}\n${BODY_END}`
+}
+
+/** The sender as shown to the recipient. Unverified senders are marked, since anyone local can send under any name. */
+export function senderLabel(m: Pick<Message, 'from' | 'verified'>): string {
+  return m.verified === true ? m.from : `${m.from} (unverified)`
+}
+
 /** Result of a send, for the tool reply and the CLI. */
 export function formatSent(to: string, r: { id: string; live: boolean; queued: number; listening: string[] }): string {
   if (r.live) return `Delivered live to ${to} (id ${r.id}).`

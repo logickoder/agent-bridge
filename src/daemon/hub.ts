@@ -1,4 +1,4 @@
-import { autoBase, inFamily, nextFree } from '../names.js'
+import { autoBase, inFamily, nextFree, sessionTag } from '../names.js'
 import type { Message, Peer, PeerKind, PeerStatus, Reply, Request } from '../schema.js'
 
 /** A peer with nothing queued and no activity for this long is dropped, freeing its name. */
@@ -30,6 +30,12 @@ export interface HubDeps {
   log?: (msg: string) => void
   /** Pushes one message through an adapter's endpoint. Resolves once delivered. */
   deliver?: (kind: PeerKind, endpoint: Record<string, string>, msg: Message) => Promise<void>
+}
+
+/** Status as clients see it: session ids become tags, and the previous session is dropped. */
+function redact(p: PeerStatus): PeerStatus {
+  const { lastSession: _dropped, ...rest } = p
+  return { ...rest, session: p.session === null ? null : sessionTag(p.session) }
 }
 
 /**
@@ -142,7 +148,7 @@ export class Hub {
         this.leave(req.as)
         return this.reply(conn, { type: 'ok' })
       case 'status':
-        return this.reply(conn, { type: 'status', pid: this.deps.pid, peers: this.status() })
+        return this.reply(conn, { type: 'status', pid: this.deps.pid, peers: this.status().map(redact) })
     }
   }
 
@@ -341,7 +347,13 @@ export class Hub {
       const known = [...this.peers.keys()].join(', ') || 'none yet'
       return this.fail(conn, `unknown peer "${req.to}". Known peers: ${known}. A peer is known once it joins the bridge.`)
     }
-    const msg: Message = { id: this.deps.newId(), from: req.from, to: peer.name, text: req.text, ts: this.deps.now().toISOString() }
+    // A sender inside an agent session must use a name that session holds. Without a session, it is unverified.
+    const holder = this.peers.get(req.from)
+    const verified = req.sessions?.length ? holder?.session != null && req.sessions.includes(holder.session) : false
+    if (req.sessions?.length && !verified) {
+      return this.fail(conn, `"${req.from}" is not this session's name. Send as your own name; \`agent-bridge whoami\` prints it.`)
+    }
+    const msg: Message = { id: this.deps.newId(), from: req.from, to: peer.name, text: req.text, ts: this.deps.now().toISOString(), verified }
     const q = this.queue(peer.name)
     q.push(msg)
     this.deps.store.saveQueue(peer.name, q)

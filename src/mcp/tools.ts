@@ -5,7 +5,10 @@ import { defineTool, type Tool } from './server.js'
 import { PeerName } from '../schema.js'
 
 /** A server either speaks for one fixed peer (`self`) or takes the sender's name on every call (`as`). */
-export type ToolContext = { self: string } | { asHelp: string }
+export type ToolContext = ({ self: string } | { asHelp: string }) & {
+  /** The server's agent session, when it knows it. Sends then carry it and count as verified. */
+  sessions?: string[]
+}
 
 export function bridgeTools(ctx: ToolContext): Tool[] {
   const self = 'self' in ctx ? ctx.self : undefined
@@ -25,7 +28,7 @@ export function bridgeTools(ctx: ToolContext): Tool[] {
     run: async args => {
       const from = self ?? args.as
       if (!from) throw new Error(`"as" is missing. This server does not know who you are. Pass ${asHelp}.`)
-      const r = await request({ op: 'send', from, to: args.to, text: args.text }, 'sent')
+      const r = await request({ op: 'send', from, to: args.to, text: args.text, ...(ctx.sessions?.length ? { sessions: ctx.sessions } : {}) }, 'sent')
       return formatSent(args.to, r)
     },
   })
