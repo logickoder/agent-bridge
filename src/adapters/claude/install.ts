@@ -1,23 +1,45 @@
+import { spawnSync } from 'node:child_process'
 import path from 'node:path'
-import { linkBin, unlinkBin } from '../../lib/config.js'
+import { unlinkBin } from '../../lib/config.js'
 import type { InstallContext } from '../types.js'
 
-// Claude needs no config change: claude-bridge passes the server per launch. Only the launcher goes on PATH.
+// Claude joins through a local plugin: the repo is a marketplace (.claude-plugin/marketplace.json) whose
+// plugin lives in src/adapters/claude/plugin. A local-path marketplace loads in place, so a rebuild needs
+// no reinstall. The channel launcher is opt-in now: `agent-bridge claude`, or an alias for it.
 
-const LAUNCHER = 'claude-bridge'
+const MARKETPLACE = 'agent-bridge'
+const PLUGIN = `agent-bridge@${MARKETPLACE}`
+/** Linked by older installs. Removed on install and uninstall. */
+const LEGACY_LAUNCHER = 'claude-bridge'
 
-const launcherLink = (ctx: InstallContext): { dst: string; src: string } => ({
-  dst: path.join(ctx.binDir, LAUNCHER),
-  src: path.join(ctx.repo, 'bin', LAUNCHER),
-})
+const claudeBin = (ctx: InstallContext): string => ctx.env['AGENT_BRIDGE_CLAUDE_BIN'] ?? 'claude'
+
+/** Runs the claude CLI. A failure becomes a report line, not an exception: agy's setup must still finish. */
+function claude(ctx: InstallContext, args: string[], ok: string): string {
+  const r = spawnSync(claudeBin(ctx), args, { encoding: 'utf8' })
+  if (r.error) return `claude    skipped: ${r.error.message}. Install Claude Code, then rerun \`agent-bridge install\`.`
+  if (r.status === 0) return ok
+  const why = `${r.stderr}${r.stdout}`.trim().split('\n')[0] ?? `exit ${r.status}`
+  return `claude    \`claude ${args.join(' ')}\` failed: ${why}`
+}
+
+function removeLegacyLauncher(ctx: InstallContext): string[] {
+  const dst = path.join(ctx.binDir, LEGACY_LAUNCHER)
+  return unlinkBin(dst, path.join(ctx.repo, 'bin', LEGACY_LAUNCHER)) ? [`removed ${dst}`] : []
+}
 
 export function install(ctx: InstallContext): string[] {
-  const { dst, src } = launcherLink(ctx)
-  linkBin(dst, src)
-  return [`bin       ${dst}`]
+  return [
+    ...removeLegacyLauncher(ctx),
+    claude(ctx, ['plugin', 'marketplace', 'add', ctx.repo], `claude    marketplace ${MARKETPLACE} (${ctx.repo})`),
+    claude(ctx, ['plugin', 'install', PLUGIN], `claude    plugin ${PLUGIN}`),
+  ]
 }
 
 export function uninstall(ctx: InstallContext): string[] {
-  const { dst, src } = launcherLink(ctx)
-  return unlinkBin(dst, src) ? [`removed ${dst}`] : []
+  return [
+    ...removeLegacyLauncher(ctx),
+    claude(ctx, ['plugin', 'uninstall', PLUGIN], `removed claude plugin ${PLUGIN}`),
+    claude(ctx, ['plugin', 'marketplace', 'remove', MARKETPLACE], `removed claude marketplace ${MARKETPLACE}`),
+  ]
 }

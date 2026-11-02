@@ -9,7 +9,7 @@ agent-bridge carries messages between named peers. This session joins under a na
 
 ## Join: `/bridge [name]`
 
-1. Run `agent-bridge join` in the foreground, or `agent-bridge join <name>` if the user gave a name. It prints your peer name. Remember it: this session keeps it for good.
+1. Run `agent-bridge join --kind agy` in the foreground, or `agent-bridge join --kind agy <name>` if the user gave a name. It prints your peer name. Remember it: this session keeps it. Running it again with a new name renames you.
 2. Run `agent-bridge listen --as <name>` with run_command as a background command (WaitMsBeforeAsync 500). Do not wait for it to finish.
 3. Run `agent-bridge status`. Check that your peer shows `session` equal to `$ANTIGRAVITY_CONVERSATION_ID` and `online: true`.
 4. Tell the user "Joined agent-bridge as <name>." and list the other peers from the status output. End your turn.

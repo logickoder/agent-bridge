@@ -1,0 +1,8 @@
+[
+  {
+    "name": "inbox",
+    "command": "agent-bridge monitor",
+    "description": "agent-bridge messages from peer agents",
+    "when": "on-skill-invoke:agent-bridge:bridge"
+  }
+]

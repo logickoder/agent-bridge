@@ -194,9 +194,9 @@ describe('agy listener', () => {
 describe('auto names', () => {
   // run() executes in the repo folder, so the base is agent-bridge-<kind>.
   it('gives each new agy session the next free name and keeps it per session', () => {
-    expect(run(['join'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-1' })).toMatch(/Joined agent-bridge as "agent-bridge-agy"/)
-    expect(run(['join'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-2' })).toMatch(/as "agent-bridge-agy-2"/)
-    expect(run(['join'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-1' })).toMatch(/as "agent-bridge-agy"/)
+    expect(run(['join', '--kind', 'agy'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-1' })).toMatch(/Joined agent-bridge as "agent-bridge-agy"/)
+    expect(run(['join', '--kind', 'agy'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-2' })).toMatch(/as "agent-bridge-agy-2"/)
+    expect(run(['join', '--kind', 'agy'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-1' })).toMatch(/as "agent-bridge-agy"/)
   })
 
   it('tells a session its name', () => {
@@ -230,6 +230,36 @@ describe('auto names', () => {
     expect(run(['send', 'agent-bridge-agy', 'hi'])).toMatch(/Listening now: .*agent-bridge-agy-2/)
     run(['send', 'agent-bridge-agy-2', 'done'])
     await l.exited()
+  })
+})
+
+describe('claude monitor', () => {
+  const env1 = { CLAUDE_CODE_SESSION_ID: 'mon-1' }
+
+  it('waits for join, then prints one line per message, and follows a rename', async () => {
+    const m = start(['monitor'], env1)
+    const joined = run(['join', '--kind', 'claude'], env1)
+    const name = /Joined agent-bridge as "([^"]+)"/.exec(joined)?.[1] ?? ''
+    expect(name).toMatch(/^agent-bridge-claude/)
+    await online(name)
+    run(['send', name, 'first\nsecond'])
+    await until(() => m.out().includes('first\\nsecond'), 'monitor line')
+    expect(m.out()).toMatch(/Reply with: agent-bridge send --as agent-bridge-claude\S* shell/)
+
+    expect(run(['join', '--kind', 'claude', 'mon-role'], env1)).toMatch(/as "mon-role"/)
+    run(['send', 'mon-role', 'after rename'])
+    await until(() => m.out().includes('after rename'), 'message after rename')
+    expect(m.p.exitCode).toBeNull()
+  })
+
+  it('refuses a second stream listener for the same session', async () => {
+    const dup = start(['monitor'], env1)
+    expect(await dup.exited()).toBe(1)
+    expect(dup.out()).toMatch(/already receives/)
+  })
+
+  it('asks for --kind when the shell has two agents\' session ids', () => {
+    expect(() => run(['join'], { CLAUDE_CODE_SESSION_ID: 'x', ANTIGRAVITY_CONVERSATION_ID: 'y' })).toThrow(/Pass --kind/)
   })
 })
 
@@ -356,7 +386,14 @@ describe('install', () => {
     const council = { command: '/x/council', args: ['mcp'] }
     fs.writeFileSync(path.join(agyDir, 'mcp_config.json'), JSON.stringify({ mcpServers: { council } }))
     fs.writeFileSync(path.join(agyDir, 'hooks.json'), JSON.stringify({ other: { PreInvocation: [] } }))
-    const targets = { AGY_CONFIG_DIR: agyDir, AGENT_BRIDGE_BIN_DIR: binDir }
+    // A fake claude CLI that records its arguments, so the test never touches the real Claude config.
+    const claudeLog = path.join(HOME, 'claude-calls.log')
+    const fakeClaude = path.join(HOME, 'fake-claude')
+    fs.writeFileSync(fakeClaude, `#!/bin/sh\necho "$*" >> ${claudeLog}\n`, { mode: 0o755 })
+    // An older install linked a claude-bridge launcher. Install removes it now.
+    fs.mkdirSync(binDir, { recursive: true })
+    fs.symlinkSync(path.join(REPO, 'bin', 'claude-bridge'), path.join(binDir, 'claude-bridge'))
+    const targets = { AGY_CONFIG_DIR: agyDir, AGENT_BRIDGE_BIN_DIR: binDir, AGENT_BRIDGE_CLAUDE_BIN: fakeClaude }
     run(['install'], targets)
     run(['install'], targets)
 
@@ -367,12 +404,17 @@ describe('install', () => {
     expect(read('hooks.json')).toMatchObject({ other: {}, 'agent-bridge': { enabled: true } })
     expect(fs.existsSync(path.join(agyDir, 'skills', 'bridge', 'SKILL.md'))).toBe(true)
     expect(fs.readlinkSync(path.join(binDir, 'agent-bridge'))).toBe(CLI)
-    expect(fs.readlinkSync(path.join(binDir, 'claude-bridge'))).toBe(path.join(REPO, 'bin', 'claude-bridge'))
+    expect(fs.existsSync(path.join(binDir, 'claude-bridge'))).toBe(false)
+    const calls = (): string[] => fs.readFileSync(claudeLog, 'utf8').trim().split('\n')
+    expect(calls()).toContain(`plugin marketplace add ${REPO}`)
+    expect(calls()).toContain('plugin install agent-bridge@agent-bridge')
 
     run(['uninstall'], targets)
     expect(read('mcp_config.json')).toEqual({ mcpServers: { council } })
     expect(read('hooks.json')).toEqual({ other: { PreInvocation: [] } })
     expect(fs.existsSync(path.join(agyDir, 'skills', 'bridge'))).toBe(false)
     expect(fs.existsSync(path.join(binDir, 'agent-bridge'))).toBe(false)
+    expect(calls()).toContain('plugin uninstall agent-bridge@agent-bridge')
+    expect(calls()).toContain('plugin marketplace remove agent-bridge')
   })
 })

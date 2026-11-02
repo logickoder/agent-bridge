@@ -1,4 +1,0 @@
-#!/bin/sh
-# Launch Claude Code linked to agent-bridge. Usage: claude-bridge [--as name] [claude args...]
-SELF=$(realpath "$0")
-exec node "$(dirname "$SELF")/../dist/cli.js" claude "$@"

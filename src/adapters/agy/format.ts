@@ -31,3 +31,7 @@ export const supersededNotice = (by: string): string =>
   `[agent-bridge] Another session (${by}) took over this peer name. Do not re-arm the listener. Tell the user if they expected this session to stay linked.`
 
 export const stoppedNotice = '[agent-bridge] This peer left the bridge. Do not re-arm the listener.'
+
+/** What `join` prints for agy after the name. */
+export const joinedText = (name: string): string =>
+  [`Listen: run \`${listenCommand(name)}\` with run_command in the background.`, sendHint(name)].join('\n')

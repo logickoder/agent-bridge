@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { ADAPTERS } from './adapters/index.js'
 import type { Command } from './adapters/types.js'
-import { request, stopDaemon } from './client/index.js'
+import { request, resolveName, stopDaemon } from './client/index.js'
 import { formatSent } from './format.js'
-import { peerName } from './lib/args.js'
+import { peerName, takeFlag } from './lib/args.js'
 import { toError } from './lib/errors.js'
 import { logger } from './lib/log.js'
 import { HOME } from './paths.js'
@@ -17,6 +17,7 @@ const USAGE = [
   '',
   '  install | uninstall            set up or remove PATH links and every agent\'s config',
   '  status                         peers, bindings, queues',
+  '  join [name] [--kind k]         bind this session\'s name (auto: <folder>-<kind>; a name renames) and print it',
   '  whoami                         this session\'s peer name(s), from the agent\'s session id',
   '  send [--as me] <to> <text...>  send from the shell (sender "shell" by default)',
   '  leave <name>                   unbind a peer and stop its listeners',
@@ -25,6 +26,15 @@ const USAGE = [
   ...adapters.flatMap(a => Object.values(a.commands).map(c => `  ${c.usage}`)),
   '  daemon                         hub process (auto-started)',
 ].join('\n')
+
+/** The one agent whose session id is in this shell. Ambiguous or none: ask for --kind. */
+function sessionAdapter(): (typeof adapters)[number] {
+  const found = adapters.filter(a => process.env[a.sessionEnv])
+  const [only] = found
+  if (only && found.length === 1) return only
+  const why = found.length ? `this shell has session ids for ${found.map(a => a.kind).join(' and ')}` : 'this shell has no agent session id'
+  throw new Error(`cannot tell which agent this is: ${why}. Pass --kind ${adapters.map(a => a.kind).join('|')}.`)
+}
 
 const out = (line: string): void => {
   process.stdout.write(`${line}\n`)
@@ -51,6 +61,13 @@ async function main(argv: string[]): Promise<void> {
     case 'status': {
       const r = await request({ op: 'status' }, 'status')
       return out(JSON.stringify({ pid: r.pid, home: HOME, peers: r.peers }, null, 2))
+    }
+    case 'join': {
+      const kindFlag = takeFlag(args, '--kind')
+      const adapter = kindFlag === undefined ? sessionAdapter() : ADAPTERS[PeerKind.parse(kindFlag)]
+      const identity = args[0] === undefined ? { folder: process.cwd() } : { name: peerName(args[0], 'Name') }
+      const name = await resolveName(identity, adapter.kind, process.env[adapter.sessionEnv])
+      return out(`Joined agent-bridge as "${name}".\n${await adapter.joined(name)}`)
     }
     case 'whoami': {
       const sessions = adapters.flatMap(a => {

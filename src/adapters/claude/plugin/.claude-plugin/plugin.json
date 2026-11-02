@@ -1,0 +1,6 @@
+{
+  "name": "agent-bridge",
+  "version": "0.1.0",
+  "description": "Join agent-bridge from Claude Code with /bridge. A monitor delivers messages from peer agents (other Claude sessions, agy).",
+  "author": { "name": "logickoder" }
+}

@@ -30,7 +30,7 @@ export async function serveClaudeMcp(identity: Identity | undefined, env: NodeJS
     try {
       self = await resolveName(identity, 'claude', session)
     } catch (err) {
-      unnamed = `agent-bridge could not get a peer name for this session: ${toError(err).message} This session can send but not receive. Restart it with claude-bridge once the daemon works.`
+      unnamed = `agent-bridge could not get a peer name for this session: ${toError(err).message} This session can send but not receive. Relaunch with \`agent-bridge claude\` once the daemon works.`
       log(unnamed)
     }
   }
@@ -39,7 +39,7 @@ export async function serveClaudeMcp(identity: Identity | undefined, env: NodeJS
       instructions: self ? instructions(self) : unnamed,
       capabilities: { experimental: { 'claude/channel': {} } },
       tools: bridgeTools(self ? { self } : { asHelp: 'your peer name' }),
-      // Claude never tells a server whether channels are on. Only claude-bridge sets the env vars, so only
+      // Claude never tells a server whether channels are on. Only `agent-bridge claude` sets the env vars, so only
       // that session subscribes. Others (health checks, plain sessions) would ack and drop messages.
       onInitialized: () => {
         if (!self) return
@@ -64,9 +64,9 @@ export async function serveClaudeMcp(identity: Identity | undefined, env: NodeJS
   )
 }
 
-const SEND_ONLY = 'agent-bridge is loaded without a peer name, so this session can send but not receive. Start Claude with `claude-bridge` to receive.'
+const SEND_ONLY = 'agent-bridge is loaded without a peer name, so this session can send but not receive. Type /bridge, or launch with `agent-bridge claude`, to receive.'
 
-/** The identity claude-bridge put in the server's env. Neither var: send-only. */
+/** The identity `agent-bridge claude` put in the server's env. Neither var: send-only. */
 export function identityFromEnv(env: NodeJS.ProcessEnv): Identity | undefined {
   const name = env[PEER_ENV]
   if (name !== undefined) return { name: peerName(name, PEER_ENV) }

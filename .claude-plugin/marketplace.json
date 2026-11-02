@@ -1,0 +1,11 @@
+{
+  "name": "agent-bridge",
+  "owner": { "name": "logickoder" },
+  "plugins": [
+    {
+      "name": "agent-bridge",
+      "source": "./src/adapters/claude/plugin",
+      "description": "Join agent-bridge from Claude Code with /bridge"
+    }
+  ]
+}
