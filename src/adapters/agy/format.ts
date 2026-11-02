@@ -16,7 +16,7 @@ const header = (m: Message): string => `[agent-bridge] Message from ${senderLabe
 const replyHint = (m: Message): string =>
   m.verified === true
     ? `Reply by running \`agent-bridge send --as ${m.to} ${m.from} "<reply>"\` with run_command.`
-    : `"${m.from}" is not a checked peer, so it may not be able to receive a reply. Answer the user instead, unless \`agent-bridge status\` lists it.`
+    : `"${m.from}" is not a checked peer, so it may not be able to receive a reply. Answer the user instead, unless \`agent-bridge peers\` lists it online.`
 
 /** What a woken agy listener prints. */
 export function formatListened(m: Message): string {

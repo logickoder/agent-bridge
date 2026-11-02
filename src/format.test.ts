@@ -47,3 +47,28 @@ describe('formatSent for push', () => {
     expect(formatSent('agy', { id: 'x', live: false, pushed: true, queued: 1, listening: [] })).toMatch(/^Handed to agy's direct delivery \(id x\)/)
   })
 })
+
+describe('formatPeers', () => {
+  const p = (name: string, kind: string, online: boolean, queued = 0) => ({ name, kind, online, queued })
+
+  it('lists online peers and only counts offline ones', async () => {
+    const { formatPeers } = await import('./format.js')
+    const out = formatPeers([p('a-claude', 'claude', true), p('old', 'agy', false), p('b-agy', 'agy', true), p('older', 'claude', false)], { self: 'a-claude' })
+    expect(out).toBe('Online: a-claude (claude, you), b-agy (agy). 2 offline: `agent-bridge peers --all` lists them.')
+  })
+
+  it('lists everyone with all', async () => {
+    const { formatPeers } = await import('./format.js')
+    expect(formatPeers([p('a', 'claude', true), p('old', 'agy', false, 2)], { all: true })).toBe(
+      'a (claude) online, 0 queued\nold (agy) offline, 2 queued',
+    )
+  })
+
+  it('says when nobody else is online', async () => {
+    const { formatPeers } = await import('./format.js')
+    expect(formatPeers([p('me', 'claude', true), p('old', 'agy', false)], { self: 'me' })).toBe(
+      'Online: me (claude, you). 1 offline: `agent-bridge peers --all` lists them.',
+    )
+    expect(formatPeers([], {})).toBe('No peers yet. Peers appear here once they join the bridge.')
+  })
+})

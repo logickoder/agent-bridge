@@ -13,4 +13,4 @@ export function deliveredText(m: Message): string {
 
 /** What `join` prints for opencode after the name. */
 export const joinedText = (): string =>
-  'Messages from peers arrive in this session directly. Send with the bridge_send tool. See peers with `agent-bridge status`.'
+  'Messages from peers arrive in this session directly. Send with the bridge_send tool. `agent-bridge peers` lists who is online.'

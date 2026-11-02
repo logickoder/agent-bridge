@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { request } from '../client/index.js'
-import { formatSent } from '../format.js'
+import { formatPeers, formatSent } from '../format.js'
 import { defineTool, type Tool } from './server.js'
 import { PeerName } from '../schema.js'
 
@@ -35,14 +35,11 @@ export function bridgeTools(ctx: ToolContext): Tool[] {
 
   const peers = defineTool({
     name: 'peers',
-    description: 'List peers on agent-bridge: name, kind, whether they are listening now, and queued messages.',
-    args: z.object({}),
-    run: async () => {
+    description: 'List peers on agent-bridge who are online now. Offline peers are only counted; pass all for everyone with queue sizes.',
+    args: z.object({ all: z.boolean().optional().describe('List offline peers too.') }),
+    run: async args => {
       const { peers: list } = await request({ op: 'status' }, 'status')
-      if (!list.length) return 'No peers yet. Peers appear here once they join the bridge.'
-      return list
-        .map(p => `${p.name} (${p.kind}) ${p.online ? 'listening' : 'offline'}, ${p.queued} queued${p.name === self ? ', you' : ''}`)
-        .join('\n')
+      return formatPeers(list, { ...(args.all ? { all: true } : {}), ...(self ? { self } : {}) })
     },
   })
 

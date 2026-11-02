@@ -31,3 +31,23 @@ export function formatSent(to: string, r: { id: string; live: boolean; pushed?: 
   const queued = `Queued for ${to} (id ${r.id}, ${r.queued} waiting). ${to} gets it after the messages ahead of it, or when it next listens or starts a turn.`
   return r.listening.length ? `${queued} Listening now: ${r.listening.join(', ')}. If ${to} has ended, resend to one of them.` : queued
 }
+
+interface PeerLine {
+  name: string
+  kind: string
+  online: boolean
+  queued: number
+}
+
+/**
+ * Peers for people and agents: online ones by name, offline ones only as a count, since an offline peer cannot
+ * answer. `all` lists everyone with state and queue, for stats.
+ */
+export function formatPeers(peers: PeerLine[], opts: { all?: boolean; self?: string }): string {
+  if (!peers.length) return 'No peers yet. Peers appear here once they join the bridge.'
+  if (opts.all) return peers.map(p => `${p.name} (${p.kind}) ${p.online ? 'online' : 'offline'}, ${p.queued} queued`).join('\n')
+  const online = peers.filter(p => p.online).map(p => `${p.name} (${p.kind}${p.name === opts.self ? ', you' : ''})`)
+  const offline = peers.length - online.length
+  const head = online.length ? `Online: ${online.join(', ')}.` : 'Nobody is online.'
+  return offline ? `${head} ${offline} offline: \`agent-bridge peers --all\` lists them.` : head
+}

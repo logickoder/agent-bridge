@@ -21,7 +21,7 @@ export const joinedText = (name: string, pushed: boolean): string =>
     pushed
       ? 'Messages from peers arrive in this session directly, as messages from another session.'
       : 'Messages from peers arrive as monitor events from the agent-bridge monitor.',
-    `Send or reply with: ${sendCommand(name, '<peer>')}. See peers with \`agent-bridge status\`.`,
+    `Send or reply with: ${sendCommand(name, '<peer>')}. \`agent-bridge peers\` lists who is online.`,
   ].join('\n')
 
 export const monitorNotice = (text: string): string => `[agent-bridge] ${text.replace(/\s+/g, ' ').trim()}`
