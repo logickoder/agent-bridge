@@ -343,6 +343,22 @@ describe('agy push', () => {
   })
 })
 
+describe('opencode stream', () => {
+  it('waits for join, then prints one JSON line per message for the plugin to prompt', async () => {
+    const oenv = { OPENCODE_SESSION_ID: 'ses_e2e' }
+    const st = start(['opencode-stream'], oenv)
+    expect(run(['join', '--kind', 'opencode', 'oc-peer'], oenv)).toMatch(/Joined agent-bridge as "oc-peer"[\s\S]*bridge_send/)
+    await online('oc-peer')
+    run(['send', 'oc-peer', 'hello opencode'])
+    await until(() => st.out().includes('hello opencode'), 'stream line')
+    const line = JSON.parse(st.out().trim().split('\n')[0] ?? '') as { type: string; text: string }
+    expect(line.type).toBe('message')
+    expect(line.text).toMatch(/Message from shell \(unverified\) to oc-peer[\s\S]*bridge_send/)
+    st.p.stdin.end()
+    expect(await st.exited()).toBe(0)
+  })
+})
+
 describe('agy hook', () => {
   it('injects only for the bound conversation', async () => {
     const l = start(['listen', '--as', 'agy-b'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-b' })
@@ -488,7 +504,8 @@ describe('install', () => {
     // An older install linked a claude-bridge launcher. Install removes it now.
     fs.mkdirSync(binDir, { recursive: true })
     fs.symlinkSync(path.join(REPO, 'bin', 'claude-bridge'), path.join(binDir, 'claude-bridge'))
-    const targets = { AGY_CONFIG_DIR: agyDir, AGENT_BRIDGE_BIN_DIR: binDir, AGENT_BRIDGE_CLAUDE_BIN: fakeClaude }
+    const opencodeDir = path.join(HOME, 'opencode')
+    const targets = { AGY_CONFIG_DIR: agyDir, AGENT_BRIDGE_BIN_DIR: binDir, AGENT_BRIDGE_CLAUDE_BIN: fakeClaude, OPENCODE_CONFIG_DIR: opencodeDir }
     run(['install'], targets)
     run(['install'], targets)
 
@@ -503,6 +520,8 @@ describe('install', () => {
     const calls = (): string[] => fs.readFileSync(claudeLog, 'utf8').trim().split('\n')
     expect(calls()).toContain(`plugin marketplace add ${REPO}`)
     expect(calls()).toContain('plugin install agent-bridge@agent-bridge')
+    const ocPlugin = path.join(opencodeDir, 'plugins', 'agent-bridge.js')
+    expect(fs.readFileSync(ocPlugin, 'utf8')).toContain("id: 'agent-bridge'")
 
     run(['uninstall'], targets)
     expect(read('mcp_config.json')).toEqual({ mcpServers: { council } })
@@ -511,5 +530,6 @@ describe('install', () => {
     expect(fs.existsSync(path.join(binDir, 'agent-bridge'))).toBe(false)
     expect(calls()).toContain('plugin uninstall agent-bridge@agent-bridge')
     expect(calls()).toContain('plugin marketplace remove agent-bridge')
+    expect(fs.existsSync(ocPlugin)).toBe(false)
   })
 })

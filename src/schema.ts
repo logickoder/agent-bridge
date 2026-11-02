@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const PEER_KINDS = ['claude', 'agy'] as const
+export const PEER_KINDS = ['claude', 'agy', 'opencode'] as const
 
 export const MAX_PEER_NAME = 32
 export const PeerName = z
