@@ -5,7 +5,7 @@ Live messaging between agent CLI sessions, as named peers. Claude Code, agy (Ant
 ## Quick start
 
 ```sh
-cd ~/projects/agent-bridge
+git clone https://github.com/logickoder/agent-bridge.git && cd agent-bridge
 pnpm install && pnpm build
 node dist/cli.js install          # once per machine
 ```
@@ -68,3 +68,7 @@ Layout and conventions: [AGENTS.md](AGENTS.md).
 - Adapters exist for Claude Code, agy and opencode. opencode's v2 plugin API is beta, and agy's `agentapi` and Claude's socket line format are undocumented, so each keeps a fallback.
 - The opt-in channel path shows a development-channel notice at every launch.
 - The sender check is not a security boundary between processes of the same user.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
