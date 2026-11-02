@@ -12,7 +12,7 @@ node dist/cli.js install          # once per machine
 
 Then join from each session: `/bridge` in Claude Code or agy, or ask opencode to join the bridge. Without a name you get `<folder>-<kind>` (e.g. `myapp-claude`, `myapp-agy`, `myapp-opencode`); `/bridge planner` picks one. Ask any session to message another by name. `/bridge <new name>` renames, `/bridge off` leaves. `agent-bridge uninstall` removes everything.
 
-Claude Code needs no special launch: `/bridge` comes from the agent-bridge plugin that `install` registers. Claude may list it as `/agent-bridge:bridge`. Messages then arrive through the session's inbox socket. Prefer the monitor? Use `/agent-bridge:bridge-monitor`. A session in bypass-permissions mode holds socket messages for your approval, as Claude does for any message from another session. The bridge counts a held message as delivered, so one you deny, or leave for 5 minutes, is lost. In bypass mode, use the monitor (`/agent-bridge:bridge-monitor`) or a channel instead.
+Claude Code needs no special launch: `/bridge` comes from the agent-bridge plugin that `install` registers. Claude may list it as `/agent-bridge:bridge`. Messages then arrive through the session's inbox socket. Prefer the monitor? Use `/agent-bridge:bridge-monitor`. A session in bypass-permissions mode holds socket messages for your approval, as Claude does for any message from another session. The bridge counts a held message as delivered, so one you deny, or leave for 5 minutes, is lost. So in bypass mode the plugin's PreToolUse hook refuses a socket join and points Claude at the monitor (`/agent-bridge:bridge-monitor`). Hooks are the only place Claude exposes the live permission mode.
 
 Requires Node 22+ and pnpm.
 
@@ -55,7 +55,7 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 - **Never reused while held.** A new session gets the lowest free `-2`, `-3`, even when the holder is offline. The same session, including a resumed one, always gets the same name.
 - **Pruned when idle.** A peer nobody listens on is dropped after 24 hours without a listen, ack or drain, or after 7 days if messages are queued (they are dropped too, and the daemon log says so). Pruning runs when a name is claimed, never at daemon startup, so a restart does not drop sessions that have not reconnected yet.
 - **Auto names stay with their session.** Another session cannot `listen` on one; it gets an error pointing to `join`. After `/bridge off`, the same session rejoining gets its old name back.
-- **Explicit names are roles.** `/bridge planner` (or `agent-bridge claude --as planner`) takes the name, superseding any other session that held it.
+- **Explicit names are roles.** `/bridge planner` (or `agent-bridge claude --as planner`) takes the name if its holder is offline. If another session is online with it, `join` refuses: pick another name, or `join --take planner` to take it over. The old session is told: its listener, monitor or stream reports the takeover, and a push-mode session gets one last message saying so.
 - **Renaming.** `/bridge <new name>` in a session that already has a name renames it. A free new name is renamed in place: queue, binding and running listener carry over. An existing name takes the session's listener, and the old name is released.
 - **The monitor waits for `join`.** It starts when `/bridge` runs, possibly before `join` has bound a name. It listens by session id and the daemon attaches it as soon as `join` binds one.
 - **Finding your name.** `agent-bridge join` prints it, and every message repeats it. Any agent shell: `agent-bridge whoami`. (In Claude, the session id can change during a long session, so `whoami` there can miss; ask Claude instead. If Claude ever stops setting `CLAUDE_CODE_SESSION_ID`, the server keys on its pid, and each server restart gets a new name.)
@@ -105,11 +105,13 @@ Environment overrides: `AGENT_BRIDGE_HOME` (daemon state), `AGY_CONFIG_DIR`, `OP
 |---|---|
 | `agent-bridge install` / `uninstall` | Set up or remove everything above |
 | `agent-bridge status` | Peers, kinds, bound sessions, online, queued |
+| `agent-bridge peers [--all]` | Who is online. Offline peers are only counted; `--all` lists everyone with queue sizes. `join` prints the online list too |
 | `agent-bridge whoami` | This session's peer name, from the agent's session id |
 | `agent-bridge send [--as me] <to> <text>` | Send from the shell (sender `shell` by default) |
 | `agent-bridge leave <name>` | Unbind a peer and stop its listeners |
 | `agent-bridge restart` | Stop the daemon. The next client starts it |
 | `agent-bridge join [name] [--kind k] [--no-push]` | Bind this session's name (auto by default; a name renames), register direct delivery, and print it. `--kind` is needed when the shell has both agents' session ids. `--no-push` receives by listening (monitor mode, agy listener) |
+| `agent-bridge claude-guard` | Claude plugin PreToolUse hook: refuses a socket join in bypass-permissions mode |
 | `agent-bridge monitor` | Claude plugin monitor: one line per message for this session |
 | `agent-bridge claude [--as name] [claude args]` | Launch Claude Code with a channel instead of the monitor |
 | `agent-bridge listen --as <name>` | agy: wait for one message, print it, exit |
