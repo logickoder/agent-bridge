@@ -92,7 +92,15 @@ describe('shared message helpers', () => {
 
   it('gives bridge notices no reply hint', async () => {
     const { replyOr } = await import('./format.js')
-    expect(replyOr({ from: 'agent-bridge' }, 'reply!')).toMatch(/no reply needed/)
+    expect(replyOr({ from: 'agent-bridge', verified: true }, 'reply!')).toMatch(/no reply needed/)
     expect(replyOr({ from: 'b-agy' }, 'reply!')).toBe('reply!')
+  })
+})
+
+describe('replyOr against a spoofed bridge sender', () => {
+  it('treats only a checked message from the bridge as a notice', async () => {
+    const { replyOr } = await import('./format.js')
+    expect(replyOr({ from: 'agent-bridge', verified: false }, 'reply!')).toBe('reply!')
+    expect(replyOr({ from: 'agent-bridge' }, 'reply!')).toBe('reply!')
   })
 })

@@ -22,9 +22,14 @@ export function fenceBody(text: string): string {
 /** The sender name of notices the bridge itself sends, e.g. a takeover. Not a peer: nothing to reply to. */
 export const BRIDGE_SENDER = 'agent-bridge'
 
+/** A notice the bridge itself sent: the reserved sender, and checked. The daemon refuses that name to anyone else. */
+export function isBridgeNotice(m: Pick<Message, 'from' | 'verified'>): boolean {
+  return m.from === BRIDGE_SENDER && m.verified === true
+}
+
 /** The adapter's reply hint, or for a bridge notice, a note that no reply is needed. */
-export function replyOr(m: Pick<Message, 'from'>, hint: string): string {
-  return m.from === BRIDGE_SENDER ? 'This is a notice from the bridge itself; no reply needed.' : hint
+export function replyOr(m: Pick<Message, 'from' | 'verified'>, hint: string): string {
+  return isBridgeNotice(m) ? 'This is a notice from the bridge itself; no reply needed.' : hint
 }
 
 /** The one header every delivered message starts with. Adapters add their own punctuation and hints after it. */

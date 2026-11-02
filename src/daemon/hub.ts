@@ -7,6 +7,8 @@ const PRUNE_AFTER_MS = 24 * 3600_000
 /** A peer with messages queued is dropped after this long, messages included. Nobody is coming back for them. */
 const PRUNE_QUEUED_AFTER_MS = 7 * 24 * 3600_000
 /** lastSeen only feeds pruning, so it is written to disk at most this often per peer. */
+/** The bridge's own notices use this sender, so no peer may send as it, claim it or listen on it. */
+const RESERVED = `"${BRIDGE_SENDER}" is reserved for notices from the bridge itself. Pick another name.`
 const PERSIST_SEEN_MS = 3600_000
 
 /** One client connection, as the hub sees it. */
@@ -186,6 +188,7 @@ export class Hub {
   }
 
   private listen(req: ListenRequest, conn: Conn): void {
+    if (req.as === BRIDGE_SENDER) return this.fail(conn, RESERVED)
     const as = req.as ?? this.nameOf(req.session, req.kind)
     if (!as) {
       this.pending.set(conn, req)
@@ -276,6 +279,7 @@ export class Hub {
 
   /** An explicit name: bind it to the session, taking it over, unless it is another kind's or another session's auto name. */
   private claimNamed(name: string, kind: PeerKind, session: string, take: boolean): { name: string } | { error: string } {
+    if (name === BRIDGE_SENDER) return { error: RESERVED }
     const current = this.nameOf(session, kind)
     // A session that already holds a name is renaming: in place when the new name is free.
     if (current && current !== name && !this.peers.has(name)) {
@@ -375,6 +379,7 @@ export class Hub {
   }
 
   private send(req: SendRequest, conn: Conn): void {
+    if (req.from === BRIDGE_SENDER) return this.fail(conn, RESERVED)
     const peer = this.peers.get(req.to)
     if (!peer) {
       const known = [...this.peers.keys()].join(', ') || 'none yet'

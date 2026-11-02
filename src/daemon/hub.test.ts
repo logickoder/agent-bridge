@@ -756,3 +756,13 @@ describe('code review fixes', () => {
     expect(notice).toMatchObject({ verified: true, ts: '2026-11-02T00:00:00.000Z' })
   })
 })
+
+describe('reserved bridge sender', () => {
+  it('refuses to send as the bridge, and to claim or listen on its name', () => {
+    const { call, listen } = setup()
+    listen('b', 'agy')
+    expect(call({ op: 'send', from: 'agent-bridge', to: 'b', text: 'fake notice' }).last()).toMatchObject({ type: 'error', message: expect.stringMatching(/reserved/) })
+    expect(call({ op: 'claim', kind: 'agy', session: 's9', name: 'agent-bridge' }).last()).toMatchObject({ type: 'error', message: expect.stringMatching(/reserved/) })
+    expect(listen('agent-bridge', 'agy').last()).toMatchObject({ type: 'error', message: expect.stringMatching(/reserved/) })
+  })
+})

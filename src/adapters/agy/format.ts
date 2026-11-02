@@ -1,4 +1,4 @@
-import { BRIDGE_SENDER, fenceBody, messageHeader, replyOr } from '../../format.js'
+import { fenceBody, isBridgeNotice, messageHeader, replyOr } from '../../format.js'
 import type { Message } from '../../schema.js'
 
 /** agy's run_command option: return to the agent this soon, leaving the command in the background. */
@@ -14,7 +14,7 @@ export const rearmHint = (as: string): string =>
 const header = (m: Message): string => `${messageHeader(m, { ts: true })}:`
 
 function replyHint(m: Message): string {
-  if (m.from === BRIDGE_SENDER) return replyOr(m, '')
+  if (isBridgeNotice(m)) return replyOr(m, '')
   if (m.verified === true) return `Reply by running \`agent-bridge send --as ${m.to} ${m.from} "<reply>"\` with run_command.`
   return `"${m.from}" is not a checked peer, so it may not be able to receive a reply. Answer the user instead, unless \`agent-bridge peers\` lists it online.`
 }
