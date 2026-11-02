@@ -9,8 +9,12 @@ const BODY_END = '--- end of message text ---'
  */
 export function fenceBody(text: string): string {
   const safe = text
+    .replace(/\r\n?/g, '\n')
     .split('\n')
-    .map(line => (line.startsWith('[agent-bridge]') || line.startsWith('---') ? `\\${line}` : line))
+    .map(line => {
+      const t = line.trimStart()
+      return t.startsWith('[agent-bridge]') || t.startsWith('---') ? `\\${line}` : line
+    })
     .join('\n')
   return `${BODY_START}\n${safe}\n${BODY_END}`
 }
