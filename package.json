@@ -1,0 +1,29 @@
+{
+  "name": "agent-bridge",
+  "version": "0.1.0",
+  "description": "Live messaging between agent CLI sessions (Claude Code, agy) as named peers",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "agent-bridge": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@12.16.1",
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --dir src",
+    "test:e2e": "pnpm build && vitest run --dir test",
+    "check": "pnpm typecheck && pnpm test && pnpm test:e2e"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
