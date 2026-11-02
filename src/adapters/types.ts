@@ -24,6 +24,8 @@ export interface Adapter {
   kind: PeerKind
   /** How a user joins from this agent, shown after install. */
   joinHint: string
+  /** Env var holding this agent's session id in its shell, for `agent-bridge whoami`. */
+  sessionEnv: string
   /** `agent-bridge mcp <kind>`: the MCP server this agent's client launches. */
   serveMcp: () => Promise<void>
   /** Extra CLI commands this agent needs (launcher, listener, hooks). Names must be unique across adapters. */

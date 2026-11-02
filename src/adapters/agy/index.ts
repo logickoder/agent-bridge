@@ -1,6 +1,6 @@
 import { peerName, takeFlag } from '../../lib/args.js'
 import type { Adapter } from '../types.js'
-import { DEFAULT_NAME, SESSION_ENV } from './names.js'
+import { SESSION_ENV } from './names.js'
 
 // Modules load per command: the hook runs on every agy model call and must not load the rest.
 
@@ -9,18 +9,29 @@ import { DEFAULT_NAME, SESSION_ENV } from './names.js'
  * Wake: agy wakes from idle when a background run_command exits. `listen` blocks until a message
  * arrives, prints it and exits. A PreInvocation hook is the fallback when no listener is armed.
  * Identity: agy sets ANTIGRAVITY_CONVERSATION_ID in run_command's environment, and hooks receive the
- * same id as `conversationId`. That ties a peer name to one agy session.
+ * same id as `conversationId`. That ties a peer name to one agy session. `join` without a name claims
+ * `<folder>-agy[-n]` for it.
  */
 
 export const agy: Adapter = {
   kind: 'agy',
   joinHint: 'agy: type `/bridge [name]`.',
+  sessionEnv: SESSION_ENV,
   serveMcp: async () => (await import('./mcp.js')).serveAgyMcp(),
   commands: {
-    listen: {
-      usage: 'listen [--as name]             agy: wait for one message, print it, exit',
+    join: {
+      usage: 'join [name]                    agy: settle this session\'s name (auto: <folder>-agy) and print it',
       run: async args => {
-        const as = peerName(takeFlag(args, '--as') ?? DEFAULT_NAME, '--as')
+        const name = args[0] === undefined ? undefined : peerName(args[0], 'Name')
+        process.stdout.write(`${await (await import('./join.js')).join(name, process.env[SESSION_ENV], process.cwd())}\n`)
+      },
+    },
+    listen: {
+      usage: 'listen --as <name>             agy: wait for one message, print it, exit',
+      run: async args => {
+        const flag = takeFlag(args, '--as')
+        if (flag === undefined) throw new Error('listen needs --as <name>. Run `agent-bridge join` first; it prints the name.')
+        const as = peerName(flag, '--as')
         const session = takeFlag(args, '--session') ?? process.env[SESSION_ENV]
         ;(await import('./listen.js')).listen(as, session)
       },

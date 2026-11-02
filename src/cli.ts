@@ -17,6 +17,7 @@ const USAGE = [
   '',
   '  install | uninstall            set up or remove PATH links and every agent\'s config',
   '  status                         peers, bindings, queues',
+  '  whoami                         this session\'s peer name(s), from the agent\'s session id',
   '  send [--as me] <to> <text...>  send from the shell (sender "shell" by default)',
   '  leave <name>                   unbind a peer and stop its listeners',
   '  restart                        stop the daemon; the next client starts the new one',
@@ -50,6 +51,17 @@ async function main(argv: string[]): Promise<void> {
     case 'status': {
       const r = await request({ op: 'status' }, 'status')
       return out(JSON.stringify({ pid: r.pid, home: HOME, peers: r.peers }, null, 2))
+    }
+    case 'whoami': {
+      const sessions = adapters.flatMap(a => {
+        const id = process.env[a.sessionEnv]
+        return id ? [id] : []
+      })
+      if (!sessions.length) throw new Error('no agent session id in this shell. Run whoami from inside an agent session.')
+      const { peers } = await request({ op: 'status' }, 'status')
+      const mine = peers.filter(p => p.session !== null && sessions.includes(p.session))
+      if (mine.length) return out(mine.map(p => p.name).join('\n'))
+      return out(['This session is not on the bridge. To join:', ...adapters.map(a => `  ${a.joinHint}`)].join('\n'))
     }
     case 'leave': {
       const name = peerName(args[0], 'Peer name')

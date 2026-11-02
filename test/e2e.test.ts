@@ -142,25 +142,25 @@ describe('agy listener', () => {
 
   it('queues while offline and delivers on the next listen', async () => {
     expect(run(['send', 'agy', 'later'])).toMatch(/Queued for agy/)
-    const l = start(['listen'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-1' })
+    const l = start(['listen', '--as', 'agy'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-1' })
     expect(await l.exited()).toBe(0)
     expect(l.out()).toMatch(/later/)
   })
 
   it('keeps the message when the listener is killed', async () => {
-    const l = start(['listen'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-1' })
+    const l = start(['listen', '--as', 'agy'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-1' })
     await online('agy', 'conv-1')
     l.p.kill('SIGKILL')
     await l.exited()
     await until(() => peer('agy')?.online === false, 'agy offline')
     run(['send', 'agy', 'survives'])
-    const l2 = start(['listen'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-1' })
+    const l2 = start(['listen', '--as', 'agy'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-1' })
     expect(await l2.exited()).toBe(0)
     expect(l2.out()).toMatch(/survives/)
   })
 
   it('reconnects across a daemon restart', async () => {
-    const l = start(['listen'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-1' })
+    const l = start(['listen', '--as', 'agy'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-1' })
     await online('agy', 'conv-1')
     await killDaemon()
     await online('agy', 'conv-1')
@@ -171,9 +171,9 @@ describe('agy listener', () => {
   })
 
   it('a newer session takes over the name and the old listener stops', async () => {
-    const a = start(['listen'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-1' })
+    const a = start(['listen', '--as', 'agy'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-1' })
     await online('agy', 'conv-1')
-    const b = start(['listen'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-2' })
+    const b = start(['listen', '--as', 'agy'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-2' })
     expect(await a.exited()).toBe(0)
     expect(a.out()).toMatch(/took over[\s\S]*Do not re-arm/)
     run(['send', 'agy', 'for conv-2'])
@@ -182,12 +182,45 @@ describe('agy listener', () => {
   })
 
   it('leave stops listeners and releases the binding', async () => {
-    const l = start(['listen'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-2' })
+    const l = start(['listen', '--as', 'agy'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-2' })
     await online('agy', 'conv-2')
     run(['leave', 'agy'])
     expect(await l.exited()).toBe(0)
     expect(l.out()).toMatch(/left the bridge/)
     expect(peer('agy')).toMatchObject({ session: null, online: false })
+  })
+})
+
+describe('auto names', () => {
+  // run() executes in the repo folder, so the base is agent-bridge-<kind>.
+  it('gives each new agy session the next free name and keeps it per session', () => {
+    expect(run(['join'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-1' })).toMatch(/Joined agent-bridge as "agent-bridge-agy"/)
+    expect(run(['join'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-2' })).toMatch(/as "agent-bridge-agy-2"/)
+    expect(run(['join'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-1' })).toMatch(/as "agent-bridge-agy"/)
+  })
+
+  it('tells a session its name', () => {
+    expect(run(['whoami'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-2' }).trim()).toBe('agent-bridge-agy-2')
+  })
+
+  it('requires a name for listen', () => {
+    expect(() => run(['listen'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-1' })).toThrow(/listen needs --as/)
+  })
+
+  it('names a Claude session from its folder and says so in the instructions', async () => {
+    const c = mcp('claude', { AGENT_BRIDGE_BASE: 'agent-bridge-claude', CLAUDE_CODE_SESSION_ID: 'claude-auto-1' })
+    const r = await c.call('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'e2e' } })
+    expect(JSON.stringify(r['result'])).toContain('You are peer \\"agent-bridge-claude\\"')
+    expect(peer('agent-bridge-claude')).toMatchObject({ kind: 'claude', session: 'claude-auto-1' })
+    c.p.kill()
+  })
+
+  it('names who is listening when the recipient is not', async () => {
+    const l = start(['listen', '--as', 'agent-bridge-agy-2'], { ANTIGRAVITY_CONVERSATION_ID: 'auto-2' })
+    await online('agent-bridge-agy-2')
+    expect(run(['send', 'agent-bridge-agy', 'hi'])).toMatch(/Listening now: .*agent-bridge-agy-2/)
+    run(['send', 'agent-bridge-agy-2', 'done'])
+    await l.exited()
   })
 })
 

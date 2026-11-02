@@ -1,11 +1,9 @@
 import { z } from 'zod'
+import { SERVER_NAME, VERSION } from './identity.js'
 import { toError } from '../lib/errors.js'
 import { logger } from '../lib/log.js'
 import { onLines, writeLine } from '../lib/wire.js'
 
-/** Name every client sees for this server. Also the key in client configs. */
-export const SERVER_NAME = 'agent-bridge'
-const VERSION = '0.1.0'
 const FALLBACK_PROTOCOL = '2025-06-18'
 const METHOD_NOT_FOUND = -32601
 const INVALID_PARAMS = -32602

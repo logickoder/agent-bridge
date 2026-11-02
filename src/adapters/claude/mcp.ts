@@ -1,9 +1,9 @@
-import { holdListen } from '../../client/index.js'
+import { holdListen, request } from '../../client/index.js'
 import { peerName } from '../../lib/args.js'
 import { logger } from '../../lib/log.js'
 import { createMcpHandler, serveStdio } from '../../mcp/server.js'
 import { bridgeTools } from '../../mcp/tools.js'
-import { DEFAULT_NAME, PEER_ENV } from './names.js'
+import { BASE_ENV, PEER_ENV, SESSION_ENV, type Identity } from './names.js'
 
 function instructions(self: string): string {
   return [
@@ -14,21 +14,29 @@ function instructions(self: string): string {
   ].join('\n')
 }
 
-/** MCP server inside a Claude session. Without AGENT_BRIDGE_PEER it only sends and never consumes. */
-export function serveClaudeMcp(self: string | undefined): void {
+/**
+ * MCP server inside a Claude session. With an identity it claims its name first, so the instructions
+ * Claude reads already say who it is. Without one it only sends and never consumes.
+ */
+export async function serveClaudeMcp(identity: Identity | undefined, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const log = logger('claude')
-  const name = self ?? DEFAULT_NAME
+  const session = env[SESSION_ENV] ?? `claude-${process.pid}`
+  const self = !identity
+    ? undefined
+    : 'name' in identity
+      ? identity.name
+      : (await request({ op: 'claim', base: identity.base, kind: 'claude', session }, 'claimed')).name
   const mcp = serveStdio(
     createMcpHandler({
-      instructions: instructions(name),
+      instructions: self ? instructions(self) : SEND_ONLY,
       capabilities: { experimental: { 'claude/channel': {} } },
-      tools: bridgeTools({ self: name }),
-      // Claude never tells a server whether channels are on. Only claude-bridge sets the env var, so only
+      tools: bridgeTools(self ? { self } : { asHelp: 'your peer name' }),
+      // Claude never tells a server whether channels are on. Only claude-bridge sets the env vars, so only
       // that session subscribes. Others (health checks, plain sessions) would ack and drop messages.
       onInitialized: () => {
         if (!self) return
         holdListen(
-          { op: 'listen', as: self, kind: 'claude', session: `claude-${process.pid}`, stream: true },
+          { op: 'listen', as: self, kind: 'claude', session, stream: true },
           {
             onMessage: async msg => {
               mcp.notify('notifications/claude/channel', { content: msg.text, meta: { from: msg.from, id: msg.id, ts: msg.ts } })
@@ -48,8 +56,12 @@ export function serveClaudeMcp(self: string | undefined): void {
   )
 }
 
-/** Reads the peer name claude-bridge put in the server's env. Absent: send-only. */
-export function selfFromEnv(env: NodeJS.ProcessEnv): string | undefined {
-  const value = env[PEER_ENV]
-  return value === undefined ? undefined : peerName(value, PEER_ENV)
+const SEND_ONLY = 'agent-bridge is loaded without a peer name, so this session can send but not receive. Start Claude with `claude-bridge` to receive.'
+
+/** The identity claude-bridge put in the server's env. Neither var: send-only. */
+export function identityFromEnv(env: NodeJS.ProcessEnv): Identity | undefined {
+  const name = env[PEER_ENV]
+  if (name !== undefined) return { name: peerName(name, PEER_ENV) }
+  const base = env[BASE_ENV]
+  return base === undefined ? undefined : { base: peerName(base, BASE_ENV) }
 }

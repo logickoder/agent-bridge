@@ -1,17 +1,20 @@
 import type { Adapter } from '../types.js'
+import { SESSION_ENV } from './names.js'
 
 /**
  * Claude Code adapter.
  * Wake: channel push (`notifications/claude/channel`) into a session started with the dev-channel flag.
- * Identity: the peer name from `claude-bridge --as`, passed to the MCP server as AGENT_BRIDGE_PEER.
+ * Identity: `claude-bridge --as <name>`, or an auto name `<folder>-claude[-n]` claimed for
+ * CLAUDE_CODE_SESSION_ID. claude-bridge passes either to the MCP server in its env.
  */
 
 export const claude: Adapter = {
   kind: 'claude',
   joinHint: 'Claude: run `claude-bridge [--as name]`.',
+  sessionEnv: SESSION_ENV,
   serveMcp: async () => {
-    const { selfFromEnv, serveClaudeMcp } = await import('./mcp.js')
-    serveClaudeMcp(selfFromEnv(process.env))
+    const { identityFromEnv, serveClaudeMcp } = await import('./mcp.js')
+    await serveClaudeMcp(identityFromEnv(process.env))
   },
   commands: {
     claude: {
