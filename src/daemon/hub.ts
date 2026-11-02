@@ -134,8 +134,10 @@ export class Hub {
         return this.reply(conn, { type: 'ok' })
       case 'push':
         if (!this.deps.deliver) return this.fail(conn, 'this daemon cannot push. Run `agent-bridge restart`.')
-        this.push(req.kind, req.session, req.endpoint, this.deps.deliver)
-        return this.reply(conn, { type: 'ok' })
+      {
+        const refused = this.push(req.kind, req.session, req.endpoint, this.deps.deliver)
+        return refused ? this.fail(conn, refused) : this.reply(conn, { type: 'ok' })
+      }
       case 'leave':
         this.leave(req.as)
         return this.reply(conn, { type: 'ok' })
@@ -195,15 +197,20 @@ export class Hub {
     this.pump(peer.name)
   }
 
-  private push(kind: PeerKind, session: string, endpoint: Record<string, string>, deliver: NonNullable<HubDeps['deliver']>): void {
+  /** Registers a push endpoint. Returns why it was refused, if it was. */
+  private push(kind: PeerKind, session: string, endpoint: Record<string, string>, deliver: NonNullable<HubDeps['deliver']>): string | undefined {
     const old = this.pushers.get(session)
     if (old) this.dropPusher(old)
+    let refused: string | undefined
     const conn = new PushConn(this, deliver, kind, endpoint, (c, why) => {
+      refused ??= why
       this.deps.log?.(`push endpoint for session ${session} dropped: ${why}`)
       this.dropPusher(c)
     })
     this.pushers.set(session, conn)
     this.listen({ op: 'listen', kind, session, stream: true }, conn)
+    // listen answers synchronously when it refuses (another stream listener, a name clash).
+    return conn.closed ? refused : undefined
   }
 
   /** True once for a bound session without a push endpoint: it should run `join` again to restore direct delivery. */

@@ -17,7 +17,7 @@ const USAGE = [
   '',
   '  install | uninstall            set up or remove PATH links and every agent\'s config',
   '  status                         peers, bindings, queues',
-  '  join [name] [--kind k]         bind this session\'s name (auto: <folder>-<kind>; a name renames) and print it',
+  '  join [name] [--kind k] [--no-push]  bind this session\'s name (auto: <folder>-<kind>; a name renames); --no-push: receive by listening',
   '  whoami                         this session\'s peer name(s), from the agent\'s session id',
   '  send [--as me] <to> <text...>  send from the shell (sender "shell" by default)',
   '  leave <name>                   unbind a peer and stop its listeners',
@@ -63,14 +63,25 @@ async function main(argv: string[]): Promise<void> {
       return out(JSON.stringify({ pid: r.pid, home: HOME, peers: r.peers }, null, 2))
     }
     case 'join': {
+      const noPush = args.includes('--no-push')
+      if (noPush) args.splice(args.indexOf('--no-push'), 1)
       const kindFlag = takeFlag(args, '--kind')
       const adapter = kindFlag === undefined ? sessionAdapter() : ADAPTERS[PeerKind.parse(kindFlag)]
       const identity = args[0] === undefined ? { folder: process.cwd() } : { name: peerName(args[0], 'Name') }
       const session = process.env[adapter.sessionEnv]
       const name = await resolveName(identity, adapter.kind, session)
-      const endpoint = session ? await adapter.pushEndpoint?.(process.env) : undefined
-      if (session && endpoint) await request({ op: 'push', kind: adapter.kind, session, endpoint }, 'ok')
-      return out(`Joined agent-bridge as "${name}".\n${await adapter.joined(name, endpoint !== undefined)}`)
+      const endpoint = session && !noPush ? await adapter.pushEndpoint?.(process.env) : undefined
+      let pushed = false
+      let note = ''
+      if (session && endpoint) {
+        try {
+          await request({ op: 'push', kind: adapter.kind, session, endpoint }, 'ok')
+          pushed = true
+        } catch (err) {
+          note = `\nDirect delivery not registered: ${toError(err).message}`
+        }
+      }
+      return out(`Joined agent-bridge as "${name}".\n${await adapter.joined(name, pushed)}${note}`)
     }
     case 'whoami': {
       const sessions = adapters.flatMap(a => {

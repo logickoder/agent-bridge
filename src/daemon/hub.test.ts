@@ -575,3 +575,15 @@ describe('rejoin hint', () => {
     expect(drain(call, 'nobody')).toMatchObject({ rejoin: false })
   })
 })
+
+describe('push next to another receiver', () => {
+  it('refuses a push endpoint for a session that already receives through a stream listener', () => {
+    const { claim, call } = setup(memoryStore(), () => {}, async () => {})
+    claim('/x/b', 'claude', 'c1')
+    call({ op: 'listen', kind: 'claude', session: 'c1', stream: true })
+    expect(call({ op: 'push', kind: 'claude', session: 'c1', endpoint: {} }).last()).toMatchObject({
+      type: 'error',
+      message: expect.stringMatching(/already receives/),
+    })
+  })
+})
