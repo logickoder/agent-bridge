@@ -22,6 +22,10 @@ export const claude: Adapter = {
     await serveClaudeMcp(identityFromEnv(process.env))
   },
   commands: {
+    'claude-guard': {
+      usage: 'claude-guard                   claude: plugin PreToolUse hook, keeps bypass-mode sessions off the socket',
+      run: async () => (await import('./guard.js')).runGuard(),
+    },
     monitor: {
       usage: 'monitor                        claude: plugin monitor, one line per message for this session',
       run: async () => (await import('./monitor.js')).runMonitor(),
