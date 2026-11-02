@@ -7,7 +7,7 @@ import { formatPushed } from './format.js'
 import { SESSION_ENV } from './names.js'
 
 /**
- * Direct delivery into a live agy conversation with `agy agentapi send-message` (agy finding 8). It wakes an
+ * Direct delivery into a live agy conversation with `agy agentapi send-message` (docs/agents/agy.md, finding 8). It wakes an
  * idle agy. Undocumented, so the listener and the hook stay as fallbacks. agy sets the address and CSRF token
  * in run_command's environment; `join` captures them, and the daemon keeps them in memory only.
  */

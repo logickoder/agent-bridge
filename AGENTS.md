@@ -24,7 +24,8 @@
 | `src/adapters/<kind>/` | Everything agent-specific. `index.ts` exports the adapter and is the folder's only entry point. The rest is split by concern: `mcp.ts`, `install.ts`, `names.ts` (constants), and the wake path (`agy/push.ts`, `agy/listen.ts`, `agy/hook.ts`, `agy/format.ts`, `claude/socket.ts`, `claude/monitor.ts`, `claude/format.ts`, `claude/channel/`) |
 | `src/adapters/agy/skill/` | The agy `/bridge` skill, copied by install |
 | `src/adapters/opencode/plugin/` | The opencode plugin. Standalone (node built-ins only): install copies the built file into opencode's plugins folder |
-| `src/adapters/claude/plugin/` | The Claude plugin: `/bridge` (socket) and `/bridge-monitor` skills, and the monitor. Registered by install through the repo's `.claude-plugin/marketplace.json` |
+| `src/adapters/claude/plugin/` | The Claude plugin: `/bridge` (socket) and `/bridge-monitor` skills sharing `shared/peer-messages.md`, the monitor, and the bypass-guard hook. Registered by install through the repo's `.claude-plugin/marketplace.json` |
+| `docs/` | User docs (`concepts.md`, `install.md`, `agents/`) and the design record (`decisions.md`, `live-tests.md`, `adding-an-agent.md`, `open-questions.md`). Agent findings live in `docs/agents/<agent>.md`; never name a file there `claude.md`, macOS loads it as `CLAUDE.md` |
 | `test/` | Tests that touch real files, sockets or processes. `e2e.test.ts` runs against `dist/cli.js` |
 
 ## Rules
@@ -37,7 +38,7 @@
 - Import an adapter only through its `index.ts`. Files inside an adapter folder do not import from other adapters.
 - Use `src/lib/` for errno checks, JSON files, logging and JSON lines. Do not hand-roll them in a module. Logs go to stderr only: stdout carries MCP and hook output.
 - Validate everything that crosses a process boundary with the schemas in `src/schema.ts`.
-- New agent kind: add it to `PEER_KINDS`, create `src/adapters/<kind>/` with an `index.ts` exporting the `Adapter`, register it in `ADAPTERS`, add e2e coverage. See "Adding an agent" in `docs/design.md`. Never branch on kind outside `src/adapters/`.
-- Never ship an agy PreToolUse hook that returns `{}` for calls it does not mean to gate. agy treats `{}` as deny (`docs/design.md`, finding 5).
+- New agent kind: add it to `PEER_KINDS`, create `src/adapters/<kind>/` with an `index.ts` exporting the `Adapter`, register it in `ADAPTERS`, add e2e coverage. See `docs/adding-an-agent.md`. Never branch on kind outside `src/adapters/`.
+- Never ship an agy PreToolUse hook that returns `{}` for calls it does not mean to gate. agy treats `{}` as deny (`docs/agents/agy.md`, finding 5).
 - After changing `src/`, run `pnpm build` and `agent-bridge install` so the live daemon restarts on the new code.
 - Voice for user-facing text: short sentences, no em-dashes. Errors as `<what>. <why>. <do this>.`

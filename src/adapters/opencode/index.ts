@@ -4,7 +4,7 @@ import { SESSION_ENV } from './names.js'
 // Modules load per command, like every adapter.
 
 /**
- * opencode adapter (opencode findings 1 to 3).
+ * opencode adapter (docs/agents/opencode.md, findings 1 to 3).
  * Wake: the agent-bridge plugin runs inside opencode. After bridge_join it starts `agent-bridge opencode-stream`
  * for the session and hands each message to ctx.session.prompt, which wakes an idle session.
  * Identity: the plugin passes the tool call's sessionID to the CLI as OPENCODE_SESSION_ID. `join --kind opencode`

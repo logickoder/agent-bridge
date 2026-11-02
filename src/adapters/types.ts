@@ -18,7 +18,7 @@ export interface Command {
 
 /**
  * Everything agent-specific. Members load their modules on call, so importing the registry stays cheap. The hub, daemon, tools and CLI core never branch on kind.
- * See "Adding an agent" in docs/design.md.
+ * See docs/adding-an-agent.md.
  */
 export interface Adapter {
   kind: PeerKind

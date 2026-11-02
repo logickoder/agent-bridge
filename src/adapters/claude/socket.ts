@@ -7,7 +7,7 @@ import { socketText } from './format.js'
 
 /**
  * Default Claude delivery: post into the session's own inbox socket, the one Claude Code's cross-session
- * messaging uses (Claude finding 8). An idle session starts a turn. `join` reads the path from the
+ * messaging uses (docs/agents/claude-code.md, finding 8). An idle session starts a turn. `join` reads the path from the
  * documented CLAUDE_CODE_MESSAGING_SOCKET. No auth line: the daemon is not the session's child, so Claude
  * applies its inbound controls (delivered in prompting sessions, held in bypass-permission ones). The line
  * format is undocumented; the monitor and channel paths remain as choices.

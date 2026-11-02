@@ -1,4 +1,4 @@
-// agent-bridge plugin for opencode v2 (opencode findings 1 to 3). install copies the built file to
+// agent-bridge plugin for opencode v2 (docs/agents/opencode.md, findings 1 to 3). install copies the built file to
 // ~/.config/opencode/plugins/agent-bridge.js, so it must stay standalone: node built-ins only, no local imports.
 //
 // Tools: bridge_join, bridge_send, bridge_leave. Each runs the agent-bridge CLI with OPENCODE_SESSION_ID set,
