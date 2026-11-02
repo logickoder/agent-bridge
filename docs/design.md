@@ -18,11 +18,18 @@ Target: agy (Antigravity CLI) 1.4.12, Claude Code 2.1.316, macOS.
 6. **`ANTIGRAVITY_CONVERSATION_ID` is set in `run_command`'s environment.** Live: `echo $ANTIGRAVITY_CONVERSATION_ID` printed `bf9b0731-eb9f-4801-9538-a5df38232abb`, the same id hooks receive as `conversationId`. This is how a listener knows its session.
 7. **`hooks.json` is global.** `~/.gemini/config/hooks.json` applies to the CLI, desktop app and IDE. Any hook there runs in every agy session.
 
+8. **`agy agentapi send-message <conversation> <text>` wakes an idle agy.** Undocumented subcommand (`agy agentapi --help` lists `get-conversation-metadata`, `new-conversation`, `send-message`). It needs `ANTIGRAVITY_LS_ADDRESS` and `ANTIGRAVITY_CSRF_TOKEN` (sent as `x-codeium-csrf-token`); without the token the language server answers "missing CSRF token". agy sets both, plus `ANTIGRAVITY_AGENTAPI_EXE`, in `run_command`'s environment. Spike, 2026-11-02: agy started a detached `sleep 20; agy agentapi send-message $ANTIGRAVITY_CONVERSATION_ID "AGENTAPI-1: reply with exactly the word MANGO"` and ended its turn. 20s later it woke on its own and replied MANGO. The reply showed in the transcript; the injected message did not. agent-intercom uses the same call.
+
 ### Claude Code
 
 1. **Channels.** A server declaring `capabilities.experimental['claude/channel']` can send `notifications/claude/channel` with `{ content, meta }`. The message arrives in the live session as a `<channel>` turn. The telegram plugin uses this.
 2. **Non-plugin channels need `--dangerously-load-development-channels server:<name>`.** Claude confirms it at launch.
 3. **The server cannot tell whether channels are on.** Claude gates the notification handler on its side and sends no signal. A user-scope server would run in every session and in `claude mcp get` health checks, and consume messages nobody sees. Hence `claude-bridge`, which sets `AGENT_BRIDGE_PEER`. Without it the server never consumes.
+
+4. **A plugin monitor wakes an idle session.** Spike, 2026-11-02: a plugin whose monitor tails a file. A line appended while the session sat idle arrived as "Monitor event: ..." and started a new turn on its own.
+5. **Monitors get the session.** The monitor process had `CLAUDE_CODE_SESSION_ID`, the project folder as its working directory, and `CLAUDE_CODE_MESSAGING_SOCKET`.
+6. **`when: "on-skill-invoke:<plugin>:<skill>"` needs the qualified skill name.** `on-skill-invoke:bridge-spike` never started the monitor. `on-skill-invoke:bridge-spike:bridge-spike` started it on the skill's first run, and not before.
+7. **Claude treats monitor output as data, not instructions.** With no skill telling it otherwise, it declined to act on a monitor line ("That text came from the bridge, not from you"). Once the user had invoked a skill saying peer messages arrive this way and should be handled like a colleague's request, it answered.
 
 ### The bridge itself
 
@@ -51,6 +58,10 @@ Target: agy (Antigravity CLI) 1.4.12, Claude Code 2.1.316, macOS.
 | agy passes `as` on each send | agy's MCP server process has no session id. The `/bridge` skill and every message tell agy its name |
 | Hub is pure, store injected | Delivery and binding rules are unit-tested without sockets or disk |
 | Strict TypeScript, zod at boundaries, tsc to `dist/` | The code grew past what one untyped file holds. Follows the owner's TypeScript rules |
+| Claude receives through a plugin monitor by default, channels opt-in | Claude findings 4 to 7: a monitor wakes an idle session, gets the session id, and starts on `/bridge`. No launch flag, no notice. Channels stay for direct push, behind `agent-bridge claude` |
+| Listen by session, wait for `claim` | The monitor's command is fixed and starts when the skill is invoked, possibly before `join`. It cannot know the name, so the daemon parks it until the session holds one |
+| `join <name>` binds and renames | A later name moves the session's peer: in place if free, carrying queue and listeners, else onto the existing name. A running monitor follows without reconnecting |
+| `join` is core, with `--kind` | A shell can carry both agents' session ids (agy started from a Claude terminal inherits Claude's), so skills pass the kind |
 | Auto names `<folder>-<kind>[-n]`, never reused while held | Same model as Claude's own session names. No takeover or "is it still active" guesswork for defaults. The daemon assigns names (`claim`) so concurrent starts cannot collide. Explicit names keep takeover for stable roles |
 | Prune idle peers: 24h, or 7 days with mail queued | Auto names would otherwise pile up, and a dead peer that keeps receiving would never free its name. Never at startup: listeners have not reconnected. `lastSeen` writes are throttled against the stored value |
 | Auto names are locked to their session | Explicit names allow takeover, auto names do not: a stale session re-arming would otherwise steal a name re-claimed after pruning |
@@ -67,7 +78,7 @@ Target: agy (Antigravity CLI) 1.4.12, Claude Code 2.1.316, macOS.
 - PreToolUse rewrite of `agent-bridge listen` to tag the conversation (finding 5). Replaced by the env var (finding 6).
 - User-scope Claude MCP registration (Claude finding 3).
 - Checking the parent process for the channel flag instead of `claude-bridge`. It works without a wrapper, but needs a process-tree walk. The wrapper is simpler.
-- A Claude skill or plugin instead of `claude-bridge`. Channels turn on only at launch: "no channel runs until a user opts it in for the session with `--channels`" (code.claude.com/docs/en/channels). No user setting enables them. A plugin outside `claude-plugins-official` still needs `--dangerously-load-development-channels`. The launch dialog has no documented skip. Every route needs a launch flag, and `claude-bridge` is the smallest one.
+- A Claude skill or plugin that enables *channels* instead of a launcher. Channels turn on only at launch: "no channel runs until a user opts it in for the session with `--channels`" (code.claude.com/docs/en/channels). No user setting enables them. A plugin outside `claude-plugins-official` still needs `--dangerously-load-development-channels`. The launch dialog has no documented skip. Every route needs a launch flag, and `claude-bridge` is the smallest one.
 - SessionStart hook that auto-joins agy. Every agy session would join and take the binding from the real one. `/bridge` is explicit.
 - Fixed sleeps in e2e tests. They flaked under load (a listener killed before it registered). Tests wait on conditions.
 
@@ -77,6 +88,7 @@ Target: agy (Antigravity CLI) 1.4.12, Claude Code 2.1.316, macOS.
 - **2026-11-02.** PreToolUse `{}` blocked `echo ok`. Hook disabled at once, PreToolUse removed.
 - **2026-11-02.** Env var confirmed. `agent-bridge listen` in the background bound the daemon to `bf9b0731-...`. A shell send woke idle agy. agy replied PAPAYA-9 via `send_to_claude` (queued for Claude) and re-armed the listener on its own.
 - **2026-11-02.** Prototype to TypeScript rebuild: three prototype daemons found running at once (bridge finding 1). `PAPAYA-9` was no longer queued before the upgrade; what consumed it is unknown.
+- **2026-11-02.** Auto names live: `/bridge` in agy ran the skill (`join`, background `listen --as agent-bridge-agy`, `status`) and joined as `agent-bridge-agy`. A `claude-bridge` session in the same folder showed as `agent-bridge-claude`, online. Claude printed "server:agent-bridge · no MCP server configured with that name" at launch, yet received channel pushes.
 
 ## Adding an agent
 
@@ -109,6 +121,6 @@ Steps:
 4. Does the PreInvocation fallback fire live?
 5. agy to Claude through a live `claude-bridge` session.
 6. Two agy sessions under different names at once, live.
-7. Does `/bridge` invoke the skill as a slash command, from `~/.gemini/config/skills/`?
-8. Is the MCP server and `run_command` cwd the project folder in both agents, so auto names match the folder?
+7. ~~Does `/bridge` invoke the skill as a slash command?~~ Yes (live, 2026-11-02).
+8. ~~Is the cwd the project folder in both agents?~~ Yes: both got `agent-bridge-<kind>` (live, 2026-11-02).
 9. Does `claude --resume` keep `CLAUDE_CODE_SESSION_ID`, and so the auto name?

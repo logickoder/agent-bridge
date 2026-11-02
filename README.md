@@ -10,22 +10,17 @@ pnpm install && pnpm build
 node dist/cli.js install          # once per machine
 ```
 
-Then:
+Then, in Claude Code or agy, type `/bridge` (auto name `<folder>-claude` or `<folder>-agy`) or `/bridge planner`. Ask any session to message another by name. `/bridge <new name>` renames, `/bridge off` leaves. `agent-bridge uninstall` removes everything.
 
-```sh
-claude-bridge                     # Claude session, auto name <folder>-claude
-claude-bridge --as reviewer       # or pick a name
-```
-
-In agy, type `/bridge` (auto name `<folder>-agy`) or `/bridge planner`. Ask any session to message another by name. `/bridge off` in agy leaves. `agent-bridge uninstall` removes everything.
+Claude Code needs no special launch: `/bridge` comes from the agent-bridge plugin that `install` registers.
 
 Requires Node 22+ and pnpm.
 
 ## How it works
 
 ```
-Claude Code  <-- channel push ----  mcp claude (PEER=lead)        \
-             --- send / peers --->                                 \
+Claude Code  <-- plugin monitor: `agent-bridge monitor`, one line per message \
+             --- `agent-bridge send` -------------------------------------->  \
                                                                     daemon: Unix socket, disk queues,
 agy          --- send / peers --->  mcp agy (`as` per call)        /         peers + bindings (~/.agent-bridge)
              <-- `agent-bridge listen --as planner` exits           /
@@ -34,12 +29,12 @@ agy          --- send / peers --->  mcp agy (`as` per call)        /         pee
 
 Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound session.
 
-- **Sending** is the same everywhere: the `send` MCP tool (`to`, `text`, and `as` on agy). `peers` lists who is on the bridge.
+- **Sending**: `agent-bridge send --as <me> <to> <text>`, or the `send` MCP tool (`to`, `text`, and `as` on agy). `peers` or `agent-bridge status` lists who is on the bridge.
 - **Waking** depends on the agent kind. Each kind implements one `Adapter` (`src/adapters/types.ts`): its MCP server, wake path, identity, extra commands and install. Nothing outside `src/adapters/` branches on kind.
 
 | Kind | Wake | Identity |
 |---|---|---|
-| `claude` | Channel push into the live session (`notifications/claude/channel`) | `CLAUDE_CODE_SESSION_ID`, which Claude sets for MCP servers. `claude-bridge` passes the name (`--as`) or the project folder to the server |
+| `claude` | Default: the plugin's monitor prints one line per message, which Claude Code delivers as a monitor event that wakes an idle session. Opt-in: a channel push (see below) | `CLAUDE_CODE_SESSION_ID`, which Claude sets for Bash, monitors and MCP servers |
 | `agy` | A background `agent-bridge listen` exits when a message arrives, which wakes agy. A PreInvocation hook injects queued messages as a fallback | `ANTIGRAVITY_CONVERSATION_ID`, set by agy in `run_command`'s environment and sent to hooks as `conversationId` |
 
 ### Delivery rules
@@ -57,8 +52,10 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 - **Never reused while held.** A new session gets the lowest free `-2`, `-3`, even when the holder is offline. The same session, including a resumed one, always gets the same name.
 - **Pruned when idle.** A peer nobody listens on is dropped after 24 hours without a listen, ack or drain, or after 7 days if messages are queued (they are dropped too, and the daemon log says so). Pruning runs when a name is claimed, never at daemon startup, so a restart does not drop sessions that have not reconnected yet.
 - **Auto names stay with their session.** Another session cannot `listen` on one; it gets an error pointing to `join`. After `/bridge off`, the same session rejoining gets its old name back.
-- **Explicit names are roles.** `claude-bridge --as reviewer` or `/bridge planner` take the name, superseding any other session that held it.
-- **Finding your name.** Claude: the MCP instructions say "You are peer ...", and `peers` marks it "you". agy: `agent-bridge join` prints it. Any agent shell: `agent-bridge whoami`. (In Claude, the session id can change during a long session, so `whoami` there can miss; ask Claude instead. If Claude ever stops setting `CLAUDE_CODE_SESSION_ID`, the server keys on its pid, and each server restart gets a new name.)
+- **Explicit names are roles.** `/bridge planner` (or `agent-bridge claude --as planner`) takes the name, superseding any other session that held it.
+- **Renaming.** `/bridge <new name>` in a session that already has a name renames it. A free new name is renamed in place: queue, binding and running listener carry over. An existing name takes the session's listener, and the old name is released.
+- **The monitor waits for `join`.** It starts when `/bridge` runs, possibly before `join` has bound a name. It listens by session id and the daemon attaches it as soon as `join` binds one.
+- **Finding your name.** `agent-bridge join` prints it, and every message repeats it. Any agent shell: `agent-bridge whoami`. (In Claude, the session id can change during a long session, so `whoami` there can miss; ask Claude instead. If Claude ever stops setting `CLAUDE_CODE_SESSION_ID`, the server keys on its pid, and each server restart gets a new name.)
 - **Names change across restarts.** A send to a peer that is not listening says who is, so the sender can redirect.
 
 ### Binding
@@ -69,17 +66,25 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 - `agent-bridge leave <name>` (what `/bridge off` runs) unbinds the name and ends its listeners with a "do not re-arm" notice.
 - A name belongs to one kind. A Claude peer and an agy peer cannot share one.
 
-### Why `claude-bridge`
+### Channels instead of the monitor (opt-in)
 
-Claude Code accepts channel pushes only in a session launched with `--dangerously-load-development-channels server:agent-bridge`. It asks you to confirm at every launch. Declining exits Claude, so a session that declined never subscribes and never takes messages. `claude-bridge` adds that flag plus `--mcp-config`, so only that session loads the server.
+A Claude Code channel pushes messages straight into the session instead of through a monitor. It needs a launch flag, `--dangerously-load-development-channels server:agent-bridge`, and Claude prints a development-channel notice at every launch. No setting can enable it (checked in the Claude Code docs, 2026-11-02).
 
-Do not register the server at user scope. Claude does not tell a server whether channels are on. Every session and every `claude mcp get` health check would subscribe, ack messages and drop them. Without `AGENT_BRIDGE_PEER`, the server only sends and never consumes.
+```sh
+agent-bridge claude [--as name] [claude args]    # launch Claude with the channel
+alias cb='agent-bridge claude'                    # if you use it often
+```
+
+It also prints "server:agent-bridge · no MCP server configured with that name" at launch, yet receives: the server comes from `--mcp-config` and seems to register after the check. Run either the channel or `/bridge` in one session, not both; a second stream listener for a session is refused.
+
+Do not register the channel server at user scope. Claude does not tell a server whether channels are on. Without `AGENT_BRIDGE_PEER` or `AGENT_BRIDGE_FOLDER`, the server only sends and never consumes.
 
 ## What `install` changes
 
 | Target | Change |
 |---|---|
-| `/opt/homebrew/bin` (or `/usr/local/bin`, `~/.local/bin`) | Symlinks `agent-bridge` to `dist/cli.js` and `claude-bridge` to `bin/claude-bridge` |
+| `/opt/homebrew/bin` (or `/usr/local/bin`, `~/.local/bin`) | Symlinks `agent-bridge` to `dist/cli.js`. Removes a `claude-bridge` link from older installs |
+| Claude Code plugins | `claude plugin marketplace add <repo>` and `claude plugin install agent-bridge@agent-bridge`. The repo is a local marketplace (`.claude-plugin/marketplace.json`); the plugin lives in `src/adapters/claude/plugin/` and loads in place |
 | `~/.gemini/config/mcp_config.json` | Adds the `agent-bridge` server. Other servers untouched |
 | `~/.gemini/config/hooks.json` | Adds the `agent-bridge` hook group (PreInvocation). Other groups untouched |
 | `~/.gemini/config/skills/bridge/` | Copies the `/bridge` skill from `src/adapters/agy/skill/` |
@@ -88,7 +93,7 @@ Do not register the server at user scope. Claude does not tell a server whether 
 
 To pause the agy hook, set `"enabled": false` on the `agent-bridge` group in `hooks.json`.
 
-Environment overrides: `AGENT_BRIDGE_HOME` (daemon state), `AGY_CONFIG_DIR`, `AGENT_BRIDGE_BIN_DIR`.
+Environment overrides: `AGENT_BRIDGE_HOME` (daemon state), `AGY_CONFIG_DIR`, `AGENT_BRIDGE_BIN_DIR`, `AGENT_BRIDGE_CLAUDE_BIN` (the `claude` CLI install calls).
 
 ## Commands
 
@@ -100,8 +105,9 @@ Environment overrides: `AGENT_BRIDGE_HOME` (daemon state), `AGY_CONFIG_DIR`, `AG
 | `agent-bridge send [--as me] <to> <text>` | Send from the shell (sender `shell` by default) |
 | `agent-bridge leave <name>` | Unbind a peer and stop its listeners |
 | `agent-bridge restart` | Stop the daemon. The next client starts it |
-| `claude-bridge [--as name] [claude args]` | Launch Claude Code on the bridge |
-| `agent-bridge join [name]` | agy: settle this session's name (auto by default) and print it |
+| `agent-bridge join [name] [--kind k]` | Bind this session's name (auto by default; a name renames) and print it. `--kind` is needed when the shell has both agents' session ids |
+| `agent-bridge monitor` | Claude plugin monitor: one line per message for this session |
+| `agent-bridge claude [--as name] [claude args]` | Launch Claude Code with a channel instead of the monitor |
 | `agent-bridge listen --as <name>` | agy: wait for one message, print it, exit |
 | `agent-bridge mcp <kind>` | MCP server for one agent kind (`claude`, `agy`) |
 | `agent-bridge agy-hook` | agy PreInvocation hook |
@@ -121,5 +127,5 @@ Layout and conventions: `AGENTS.md`. Design history, findings and rejected appro
 ## Limits
 
 - Adapters exist for Claude Code and agy only. `docs/design.md` covers adding another.
-- Claude asks to confirm development channels at every `claude-bridge` launch.
+- The opt-in channel path shows a development-channel notice at every `agent-bridge claude` launch. The default monitor path has none.
 - Open questions are listed in `docs/design.md`.
