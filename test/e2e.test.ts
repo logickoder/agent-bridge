@@ -263,6 +263,50 @@ describe('claude monitor', () => {
   })
 })
 
+describe('agy push', () => {
+  // A fake agy on PATH: records each agentapi call and whether the token reached it, then answers like agentapi.
+  const fakeDir = path.join(HOME, 'fake-agy')
+  const calls = path.join(HOME, 'agentapi-calls.log')
+  const fakeAgy = (exitCode: number) => {
+    fs.mkdirSync(fakeDir, { recursive: true })
+    const body = exitCode === 0 ? '{"response":{"sendMessage":{}}}' : ''
+    fs.writeFileSync(
+      path.join(fakeDir, 'agy'),
+      `#!/bin/sh\nprintf '%s|%s|%s\\n' "$3" "$ANTIGRAVITY_CSRF_TOKEN" "$4" | tr '\\n' ' ' >> ${calls}\necho >> ${calls}\necho '${body}'\nexit ${exitCode}\n`,
+      { mode: 0o755 },
+    )
+  }
+  const agyEnv = (conv: string) => ({
+    ANTIGRAVITY_CONVERSATION_ID: conv,
+    ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:9',
+    ANTIGRAVITY_CSRF_TOKEN: 'csrf-e2e',
+    PATH: `${fakeDir}:${process.env['PATH'] ?? ''}`,
+  })
+
+  it('join registers the endpoint and the daemon pushes each message into the conversation', async () => {
+    fakeAgy(0)
+    const joined = run(['join', '--kind', 'agy', 'push-agy'], agyEnv('conv-push-1'))
+    expect(joined).toMatch(/arrive in this conversation directly/)
+    run(['send', 'push-agy', 'pushed hello'])
+    await until(() => fs.existsSync(calls) && fs.readFileSync(calls, 'utf8').includes('pushed hello'), 'agentapi call')
+    const line = fs.readFileSync(calls, 'utf8')
+    expect(line).toContain('conv-push-1|csrf-e2e|')
+    await until(() => peer('push-agy')?.queued === 0, 'push acked')
+    expect(JSON.stringify(status())).not.toContain('csrf-e2e')
+  })
+
+  it('keeps the message when agentapi fails, so the listener fallback still gets it', async () => {
+    fakeAgy(1)
+    run(['join', '--kind', 'agy', 'push-agy-2'], agyEnv('conv-push-2'))
+    run(['send', 'push-agy-2', 'falls back'])
+    await until(() => peer('push-agy-2')?.online === false, 'endpoint dropped')
+    expect(peer('push-agy-2')?.queued).toBe(1)
+    const l = start(['listen', '--as', 'push-agy-2'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-push-2' })
+    expect(await l.exited()).toBe(0)
+    expect(l.out()).toMatch(/falls back/)
+  })
+})
+
 describe('agy hook', () => {
   it('injects only for the bound conversation', async () => {
     const l = start(['listen', '--as', 'agy-b'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-b' })

@@ -33,5 +33,15 @@ export const supersededNotice = (by: string): string =>
 export const stoppedNotice = '[agent-bridge] This peer left the bridge. Do not re-arm the listener.'
 
 /** What `join` prints for agy after the name. */
-export const joinedText = (name: string): string =>
-  [`Listen: run \`${listenCommand(name)}\` with run_command in the background.`, sendHint(name)].join('\n')
+export const joinedText = (name: string, pushed: boolean): string =>
+  [
+    pushed
+      ? 'Messages arrive in this conversation directly. No listener needed.'
+      : `Direct delivery is unavailable here. Listen: run \`${listenCommand(name)}\` with run_command in the background.`,
+    sendHint(name),
+  ].join('\n')
+
+/** What agentapi delivers. agy's transcript does not show it, so agy is asked to name the sender in its reply. */
+export function formatPushed(m: Message): string {
+  return `${header(m)}\n${m.text}\n\n[agent-bridge] Start your reply to the user with "From ${m.from}:" and a one-line summary, so they can see what arrived. ${replyHint(m)} Messages arrive in this conversation directly; there is no listener to re-arm.`
+}

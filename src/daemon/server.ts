@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
 import { z } from 'zod'
+import { ADAPTERS } from '../adapters/index.js'
 import { Hub, type Conn } from './hub.js'
 import { acquireLock } from './lock.js'
 import { logger } from '../lib/log.js'
@@ -28,7 +29,14 @@ export function runDaemon(): void {
     log('another daemon holds the lock. Exiting.')
     return
   }
-  const hub = new Hub({ store: fileStore(), now: () => new Date(), newId: () => randomUUID().slice(0, 8), pid: process.pid, log })
+  const hub = new Hub({ store: fileStore(), now: () => new Date(), newId: () => randomUUID().slice(0, 8), pid: process.pid,
+    log,
+    deliver: async (kind, endpoint, msg) => {
+      const deliver = ADAPTERS[kind].deliver
+      if (!deliver) throw new Error(`${kind} has no push delivery.`)
+      await deliver(endpoint, msg)
+    },
+  })
 
   const exit = (): never => {
     fs.rmSync(SOCK, { force: true })

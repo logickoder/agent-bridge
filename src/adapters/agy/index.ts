@@ -6,8 +6,9 @@ import { SESSION_ENV } from './names.js'
 
 /**
  * agy (Antigravity CLI) adapter.
- * Wake: agy wakes from idle when a background run_command exits. `listen` blocks until a message
- * arrives, prints it and exits. A PreInvocation hook is the fallback when no listener is armed.
+ * Wake: `join` registers agy's agentapi endpoint and the daemon pushes each message into the conversation
+ * with `agy agentapi send-message`, which wakes an idle agy. Fallbacks: a background `listen` whose exit
+ * wakes agy, and a PreInvocation hook that injects queued messages at the next model call.
  * Identity: agy sets ANTIGRAVITY_CONVERSATION_ID in run_command's environment, and hooks receive the
  * same id as `conversationId`. That ties a peer name to one agy session. `join --kind agy` binds a name
  * to it: the one given, or `<folder>-agy[-n]`.
@@ -17,7 +18,9 @@ export const agy: Adapter = {
   kind: 'agy',
   joinHint: 'agy: type `/bridge [name]`.',
   sessionEnv: SESSION_ENV,
-  joined: async name => (await import('./format.js')).joinedText(name),
+  joined: async (name, pushed) => (await import('./format.js')).joinedText(name, pushed),
+  pushEndpoint: async env => (await import('./push.js')).endpointFromEnv(env),
+  deliver: async (endpoint, msg) => (await import('./push.js')).deliver(endpoint, msg),
   serveMcp: async () => (await import('./mcp.js')).serveAgyMcp(),
   commands: {
     listen: {

@@ -58,6 +58,11 @@ export const Request = z.discriminatedUnion('op', [
   z.object({ op: z.literal('drain'), session: z.string().min(1) }),
   z.object({ op: z.literal('ack-drained'), session: z.string().min(1), ids: z.array(z.string()) }),
   z.object({ op: z.literal('leave'), as: PeerName }),
+  /**
+   * Register a way to push messages into the session itself, e.g. agy's `agentapi send-message`. The endpoint
+   * is adapter-defined and may hold a credential, so the daemon keeps it in memory only and never shows it.
+   */
+  z.object({ op: z.literal('push'), kind: PeerKind, session: z.string().min(1), endpoint: z.record(z.string(), z.string()) }),
   z.object({ op: z.literal('status') }),
   z.object({ op: z.literal('shutdown') }),
 ])

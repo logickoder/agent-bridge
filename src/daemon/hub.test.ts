@@ -34,10 +34,12 @@ function memoryStore(peers: Peer[] = [], queues = new Map<string, Message[]>()):
   return s
 }
 
-function setup(store = memoryStore(), log: (msg: string) => void = () => {}) {
+type Deliver = NonNullable<ConstructorParameters<typeof Hub>[0]['deliver']>
+
+function setup(store = memoryStore(), log: (msg: string) => void = () => {}, deliver?: Deliver) {
   let n = 0
   const clock = { now: new Date('2026-11-02T00:00:00Z') }
-  const hub = new Hub({ store, now: () => clock.now, newId: () => `m${++n}`, pid: 1, log })
+  const hub = new Hub({ store, now: () => clock.now, newId: () => `m${++n}`, pid: 1, log, ...(deliver ? { deliver } : {}) })
   const call = (req: Exclude<Request, { op: 'shutdown' }>, conn = new FakeConn()): FakeConn => {
     hub.handle(req, conn)
     return conn
@@ -488,5 +490,69 @@ describe('rename', () => {
     claim('/x/b', 'claude', 'c1')
     call({ op: 'claim', kind: 'claude', session: 'c1', name: 'reviewer' })
     expect(hub.status()[0]?.auto).toBeFalsy()
+  })
+})
+
+describe('push endpoints', () => {
+  /** A deliver function whose calls resolve or fail when the test says so. */
+  function pushRecorder() {
+    const calls: { kind: string; endpoint: Record<string, string>; text: string; settle: (ok: boolean) => void }[] = []
+    const deliver: Deliver = (kind, endpoint, msg) =>
+      new Promise((resolve, reject) => {
+        calls.push({ kind, endpoint, text: msg.text, settle: ok => (ok ? resolve() : reject(new Error('agentapi failed'))) })
+      })
+    return { calls, deliver }
+  }
+  const flush = () => new Promise(r => setTimeout(r, 0))
+
+  it('delivers through the endpoint and dequeues on success', async () => {
+    const rec = pushRecorder()
+    const { claim, call, send, hub } = setup(memoryStore(), () => {}, rec.deliver)
+    claim('/x/b', 'agy', 's1')
+    expect(call({ op: 'push', kind: 'agy', session: 's1', endpoint: { conversation: 's1' } }).last()).toEqual({ type: 'ok' })
+    expect(send('b-agy', 'hi').last()).toMatchObject({ type: 'sent', live: true })
+    expect(rec.calls.map(c => [c.kind, c.text])).toEqual([['agy', 'hi']])
+    rec.calls[0]?.settle(true)
+    await flush()
+    expect(hub.status()[0]).toMatchObject({ queued: 0, online: true })
+  })
+
+  it('keeps the message and drops the endpoint when delivery fails', async () => {
+    const rec = pushRecorder()
+    const { claim, call, send, hub } = setup(memoryStore(), () => {}, rec.deliver)
+    claim('/x/b', 'agy', 's1')
+    call({ op: 'push', kind: 'agy', session: 's1', endpoint: {} })
+    send('b-agy', 'hi')
+    rec.calls[0]?.settle(false)
+    await flush()
+    expect(hub.status()[0]).toMatchObject({ queued: 1, online: false })
+  })
+
+  it('replaces the endpoint when the session registers again', async () => {
+    const rec = pushRecorder()
+    const { claim, call, send } = setup(memoryStore(), () => {}, rec.deliver)
+    claim('/x/b', 'agy', 's1')
+    call({ op: 'push', kind: 'agy', session: 's1', endpoint: { address: 'old' } })
+    expect(call({ op: 'push', kind: 'agy', session: 's1', endpoint: { address: 'new' } }).last()).toEqual({ type: 'ok' })
+    send('b-agy', 'hi')
+    expect(rec.calls.map(c => c.endpoint['address'])).toEqual(['new'])
+  })
+
+  it('follows a rename', () => {
+    const rec = pushRecorder()
+    const { claim, call, send } = setup(memoryStore(), () => {}, rec.deliver)
+    claim('/x/b', 'agy', 's1')
+    call({ op: 'push', kind: 'agy', session: 's1', endpoint: {} })
+    call({ op: 'claim', kind: 'agy', session: 's1', name: 'planner' })
+    send('planner', 'renamed')
+    expect(rec.calls.map(c => c.text)).toEqual(['renamed'])
+  })
+
+  it('never shows the endpoint in status', () => {
+    const rec = pushRecorder()
+    const { claim, call, hub } = setup(memoryStore(), () => {}, rec.deliver)
+    claim('/x/b', 'agy', 's1')
+    call({ op: 'push', kind: 'agy', session: 's1', endpoint: { token: 'secret' } })
+    expect(JSON.stringify(hub.status())).not.toContain('secret')
   })
 })

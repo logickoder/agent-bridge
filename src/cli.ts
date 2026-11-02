@@ -66,8 +66,11 @@ async function main(argv: string[]): Promise<void> {
       const kindFlag = takeFlag(args, '--kind')
       const adapter = kindFlag === undefined ? sessionAdapter() : ADAPTERS[PeerKind.parse(kindFlag)]
       const identity = args[0] === undefined ? { folder: process.cwd() } : { name: peerName(args[0], 'Name') }
-      const name = await resolveName(identity, adapter.kind, process.env[adapter.sessionEnv])
-      return out(`Joined agent-bridge as "${name}".\n${await adapter.joined(name)}`)
+      const session = process.env[adapter.sessionEnv]
+      const name = await resolveName(identity, adapter.kind, session)
+      const endpoint = session ? await adapter.pushEndpoint?.(process.env) : undefined
+      if (session && endpoint) await request({ op: 'push', kind: adapter.kind, session, endpoint }, 'ok')
+      return out(`Joined agent-bridge as "${name}".\n${await adapter.joined(name, endpoint !== undefined)}`)
     }
     case 'whoami': {
       const sessions = adapters.flatMap(a => {

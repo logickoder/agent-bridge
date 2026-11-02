@@ -28,6 +28,39 @@ export interface HubDeps {
   newId: () => string
   pid: number
   log?: (msg: string) => void
+  /** Pushes one message through an adapter's endpoint. Resolves once delivered. */
+  deliver?: (kind: PeerKind, endpoint: Record<string, string>, msg: Message) => Promise<void>
+}
+
+/**
+ * A listener backed by a push endpoint instead of a socket: each message goes out through deps.deliver.
+ * Success acks it. Failure closes the conn, which puts the message back and drops the endpoint.
+ */
+class PushConn implements Conn {
+  closed = false
+  constructor(
+    private readonly hub: Hub,
+    private readonly deliver: NonNullable<HubDeps['deliver']>,
+    private readonly kind: PeerKind,
+    readonly endpoint: Record<string, string>,
+    private readonly onDrop: (conn: PushConn, why: string) => void,
+  ) {}
+
+  send(reply: Reply): void {
+    if (reply.type !== 'msg') {
+      if (reply.type !== 'ok') this.onDrop(this, reply.type === 'error' ? reply.message : reply.type)
+      return
+    }
+    const msg = reply.msg
+    this.deliver(this.kind, this.endpoint, msg).then(
+      () => this.hub.handle({ op: 'ack', as: msg.to, id: msg.id }, this),
+      (err: unknown) => this.onDrop(this, err instanceof Error ? err.message : String(err)),
+    )
+  }
+
+  end(): void {
+    this.closed = true
+  }
 }
 
 interface Waiter {
@@ -64,6 +97,8 @@ export class Hub {
   private readonly byConn = new Map<Conn, Waiter>()
   /** Listeners that asked by session before the session held a name. Attached on claim. */
   private readonly pending = new Map<Conn, ListenRequest>()
+  /** One push endpoint per session, in memory only. */
+  private readonly pushers = new Map<string, PushConn>()
   /** lastSeen as last written to disk, per peer. Throttles touch() against what is stored, not in memory. */
   private readonly savedSeen = new Map<string, number>()
 
@@ -94,6 +129,10 @@ export class Hub {
         return this.reply(conn, { type: 'drained', msgs: this.drain(req.session) })
       case 'ack-drained':
         this.ackDrained(req.session, req.ids)
+        return this.reply(conn, { type: 'ok' })
+      case 'push':
+        if (!this.deps.deliver) return this.fail(conn, 'this daemon cannot push. Run `agent-bridge restart`.')
+        this.push(req.kind, req.session, req.endpoint, this.deps.deliver)
         return this.reply(conn, { type: 'ok' })
       case 'leave':
         this.leave(req.as)
@@ -152,6 +191,24 @@ export class Hub {
     this.waitersOf(peer.name).push(waiter)
     this.byConn.set(conn, waiter)
     this.pump(peer.name)
+  }
+
+  private push(kind: PeerKind, session: string, endpoint: Record<string, string>, deliver: NonNullable<HubDeps['deliver']>): void {
+    const old = this.pushers.get(session)
+    if (old) this.dropPusher(old)
+    const conn = new PushConn(this, deliver, kind, endpoint, (c, why) => {
+      this.deps.log?.(`push endpoint for session ${session} dropped: ${why}`)
+      this.dropPusher(c)
+    })
+    this.pushers.set(session, conn)
+    this.listen({ op: 'listen', kind, session, stream: true }, conn)
+  }
+
+  private dropPusher(conn: PushConn): void {
+    if (conn.closed) return
+    conn.closed = true
+    for (const [session, c] of this.pushers) if (c === conn) this.pushers.delete(session)
+    this.disconnect(conn)
   }
 
   private nameOf(session: string | undefined, kind: PeerKind): string | undefined {
