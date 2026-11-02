@@ -12,7 +12,7 @@ node dist/cli.js install          # once per machine
 
 Then join from each session: `/bridge` in Claude Code or agy, or ask opencode to join the bridge. Without a name you get `<folder>-<kind>` (e.g. `myapp-claude`, `myapp-agy`, `myapp-opencode`); `/bridge planner` picks one. Ask any session to message another by name. `/bridge <new name>` renames, `/bridge off` leaves. `agent-bridge uninstall` removes everything.
 
-Claude Code needs no special launch: `/bridge` comes from the agent-bridge plugin that `install` registers. Claude may list it as `/agent-bridge:bridge`. Messages then arrive through the session's inbox socket. Prefer the monitor? Use `/agent-bridge:bridge-monitor`. A session in bypass-permissions mode holds socket messages for your approval, as Claude does for any message from another session; use the monitor or a channel there.
+Claude Code needs no special launch: `/bridge` comes from the agent-bridge plugin that `install` registers. Claude may list it as `/agent-bridge:bridge`. Messages then arrive through the session's inbox socket. Prefer the monitor? Use `/agent-bridge:bridge-monitor`. A session in bypass-permissions mode holds socket messages for your approval, as Claude does for any message from another session. The bridge counts a held message as delivered, so one you deny, or leave for 5 minutes, is lost. In bypass mode, use the monitor (`/agent-bridge:bridge-monitor`) or a channel instead.
 
 Requires Node 22+ and pnpm.
 

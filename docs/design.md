@@ -109,6 +109,8 @@ Target: agy (Antigravity CLI) 1.4.12, Claude Code 2.1.316, macOS.
 - **2026-11-02.** Rejoin hint live. After `agent-bridge install` restarted the daemon, an agy turn showed the injected line "Direct delivery to this session is off ... Run `agent-bridge join --kind agy`", ran `join`, answered the user, and `agent-bridge-agy` was online again. The injected hint is visible in agy's transcript as a user-style message. The turn before it ("hi") got no hint; the cause was not checked.
 - **2026-11-02.** Claude receive modes live. Socket mode (`/bridge`): agy's message, posted by the daemon (not the session's child, no auth line), woke an idle prompting Claude session as a message from another session, and it replied. Monitor mode (`/bridge-monitor`) still worked in a second session.
 - **2026-11-02.** opencode live. Asked to join the bridge, opencode called `bridge_join` and joined as `agent-bridge-opencode`. agy messaged it; idle opencode woke with the fenced message (sender checked, no "(unverified)"), replied with `bridge_send`, live. A second exchange worked the same way.
+- **2026-11-02.** Claude bypass mode live (`claude --dangerously-skip-permissions`, `/bridge`). A socket message from the daemon was held: "Held peer message, from an unidentified session [verified pid <daemon>] ... The sender did not attest its permission mode and this session bypasses prompts", with the fenced body shown and Deny / Deliver. The daemon had already acked it on the socket write, so a denied or expired message (5 minutes) is lost to the bridge while the sender saw "Delivered live". Deny's notice to the sender cannot reach the daemon; its connection is closed.
+- **2026-11-02.** agy resume live. Joined with direct delivery, quit, `agy --continue`. A send reported "Delivered live" though the push then failed (exit 1); the endpoint was dropped and the message stayed queued. Typing in agy delivered it through the hook, agy replied KIWI and rejoined. Found and fixed: "live" for an unfinished push (now "Handed to ...'s direct delivery"), the rejoin hint used up earlier in the daemon run (now reset when an endpoint is lost), listener advice shown in push mode, a reply hint pointing at `shell` (not a peer), and the raw session id in the daemon log.
 
 ## Adding an agent
 
@@ -133,6 +135,12 @@ Steps:
 4. Prove the wake live once, like MANGO-7 and PAPAYA-9, and record it in the live test log above. A kind without a wake mechanism can still send. It receives only when the user types to it, via a hook.
 5. e2e coverage in `test/e2e.test.ts`.
 
+## Next adapters (researched, not built)
+
+- **Codex CLI.** Native path: the TUI runs on a local app-server daemon (unless `--no-daemon`), JSON-RPC over a WebSocket on a Unix socket under `/tmp/codex-daemon-<uid>/`. An adapter would `initialize`, find the thread with `thread/loaded/list` and `thread/read`, then `turn/start {threadId, input}` when idle or `turn/steer {threadId, expectedTurnId, input}` mid-turn. `codex --remote ws://...` attaches a TUI to a chosen app-server. Sources: learn.chatgpt.com/docs/app-server, agent-intercom `docs/live-push.md` (MIT), openai/codex#11415 (`codex inject` closed in favor of app-server). Untested here. Access (OpenAI pricing page, 2026-11-02): the CLI needs ChatGPT Plus ($20/month) or an API key (pay per token); Free and Go list only the desktop app. Whether the desktop app runs the same app-server daemon is unverified.
+- **Gemini CLI.** Hooks only: `AfterAgent` with `decision: "deny"` keeps a turn going, but nothing wakes an idle session. Would need terminal typing.
+- **Cursor CLI.** ACP over stdio for headless use only; no live-session path found.
+
 ## Open questions
 
 1. Can the user type to agy while the listener runs?
@@ -145,4 +153,4 @@ Steps:
 8. ~~Is the cwd the project folder in both agents?~~ Yes: both got `agent-bridge-<kind>` (live, 2026-11-02).
 9. Does `claude --resume` keep `CLAUDE_CODE_SESSION_ID`, and so the auto name?
 10. ~~Does agy's PreInvocation hook get `ANTIGRAVITY_LS_ADDRESS` and `ANTIGRAVITY_CSRF_TOKEN`?~~ No. A probe hook (2026-11-02) saw only `ANTIGRAVITY_CONVERSATION_ID`. Only `run_command` gets the address and token, so only `join` can register the push endpoint.
-11. Does `agentapi send-message` still work after agy restarts and resumes the same conversation (new address)?
+11. ~~Does `agentapi send-message` survive agy restarting and resuming the same conversation?~~ No. After `agy --continue` (same conversation id) the old endpoint failed with exit 1; the daemon dropped it and kept the message queued. At agy's next turn the hook delivered it, and agy ran `join` to restore direct delivery (live, 2026-11-02).
