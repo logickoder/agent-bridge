@@ -23,6 +23,7 @@
 | `src/adapters/index.ts` | `ADAPTERS` registry, typed `Record<PeerKind, Adapter>` |
 | `src/adapters/<kind>/` | Everything agent-specific. `index.ts` exports the adapter and is the folder's only entry point. The rest is split by concern: `mcp.ts`, `install.ts`, `names.ts` (constants), and the wake path (`agy/push.ts`, `agy/listen.ts`, `agy/hook.ts`, `agy/format.ts`, `claude/socket.ts`, `claude/monitor.ts`, `claude/format.ts`, `claude/channel/`) |
 | `src/adapters/agy/skill/` | The agy `/bridge` skill, copied by install |
+| `src/adapters/opencode/plugin/` | The opencode plugin. Standalone (node built-ins only): install copies the built file into opencode's plugins folder |
 | `src/adapters/claude/plugin/` | The Claude plugin: `/bridge` (socket) and `/bridge-monitor` skills, and the monitor. Registered by install through the repo's `.claude-plugin/marketplace.json` |
 | `test/` | Tests that touch real files, sockets or processes. `e2e.test.ts` runs against `dist/cli.js` |
 

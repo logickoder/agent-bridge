@@ -1,6 +1,6 @@
 # agent-bridge
 
-Live messaging between agent CLI sessions, as named peers. Claude Code and agy (Antigravity CLI) today. No polling, no headless calls, no tmux. agy never stalls.
+Live messaging between agent CLI sessions, as named peers. Claude Code, agy (Antigravity CLI) and opencode today. No polling, no headless calls, no tmux. agy never stalls.
 
 ## Quick start
 
@@ -10,7 +10,7 @@ pnpm install && pnpm build
 node dist/cli.js install          # once per machine
 ```
 
-Then, in Claude Code or agy, type `/bridge` (auto name `<folder>-claude` or `<folder>-agy`) or `/bridge planner`. Ask any session to message another by name. `/bridge <new name>` renames, `/bridge off` leaves. `agent-bridge uninstall` removes everything.
+Then join from each session: `/bridge` in Claude Code or agy, or ask opencode to join the bridge. Without a name you get `<folder>-<kind>` (e.g. `myapp-claude`, `myapp-agy`, `myapp-opencode`); `/bridge planner` picks one. Ask any session to message another by name. `/bridge <new name>` renames, `/bridge off` leaves. `agent-bridge uninstall` removes everything.
 
 Claude Code needs no special launch: `/bridge` comes from the agent-bridge plugin that `install` registers. Claude may list it as `/agent-bridge:bridge`. Messages then arrive through the session's inbox socket. Prefer the monitor? Use `/agent-bridge:bridge-monitor`. A session in bypass-permissions mode holds socket messages for your approval, as Claude does for any message from another session; use the monitor or a channel there.
 
@@ -36,6 +36,7 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 |---|---|---|
 | `claude` | Pick one. **Socket (default):** `/bridge` runs `join`, which registers the session's inbox socket (`CLAUDE_CODE_MESSAGING_SOCKET`); the daemon posts each message there and Claude shows it as a message from another session, waking an idle session. **Monitor:** `/agent-bridge:bridge-monitor` starts the plugin monitor, one line per message as a monitor event. **Channel:** launch with `agent-bridge claude` (see below) | `CLAUDE_CODE_SESSION_ID`, which Claude sets for Bash, monitors and MCP servers |
 | `agy` | Default: `join` registers agy's agentapi endpoint (address and CSRF token from `run_command`'s environment, kept in daemon memory only) and the daemon delivers each message with `agy agentapi send-message`, which wakes an idle agy. Fallbacks: a background `agent-bridge listen` whose exit wakes agy, and a PreInvocation hook that injects queued messages | `ANTIGRAVITY_CONVERSATION_ID`, set by agy in `run_command`'s environment and sent to hooks as `conversationId` |
+| `opencode` | The agent-bridge plugin (installed to `~/.config/opencode/plugins/`) adds `bridge_join`, `bridge_send` and `bridge_leave` tools. After a join it runs `agent-bridge opencode-stream` for the session and prompts each message into it with `ctx.session.prompt`, which wakes an idle session | The tool call's `sessionID`, passed to the CLI as `OPENCODE_SESSION_ID` (opencode exports none) |
 
 ### Delivery rules
 
@@ -89,13 +90,14 @@ Do not register the channel server at user scope. Claude does not tell a server 
 | Claude Code plugins | `claude plugin marketplace add <repo>` and `claude plugin install agent-bridge@agent-bridge`. The repo is a local marketplace (`.claude-plugin/marketplace.json`); the plugin lives in `src/adapters/claude/plugin/` and loads in place |
 | `~/.gemini/config/mcp_config.json` | Adds the `agent-bridge` server. Other servers untouched |
 | `~/.gemini/config/hooks.json` | Adds the `agent-bridge` hook group (PreInvocation). Other groups untouched |
+| `~/.config/opencode/plugins/agent-bridge.js` | Copies the built opencode plugin. Restart opencode to load it |
 | `~/.gemini/config/skills/bridge/` | Copies the `/bridge` skill from `src/adapters/agy/skill/` |
 
 `install` is idempotent and restarts the daemon. Rerun it after `pnpm build` or after editing the skill. `uninstall` removes only these entries and keeps state in `~/.agent-bridge`.
 
 To pause the agy hook, set `"enabled": false` on the `agent-bridge` group in `hooks.json`.
 
-Environment overrides: `AGENT_BRIDGE_HOME` (daemon state), `AGY_CONFIG_DIR`, `AGENT_BRIDGE_BIN_DIR`, `AGENT_BRIDGE_CLAUDE_BIN` (the `claude` CLI install calls).
+Environment overrides: `AGENT_BRIDGE_HOME` (daemon state), `AGY_CONFIG_DIR`, `OPENCODE_CONFIG_DIR`, `AGENT_BRIDGE_BIN_DIR`, `AGENT_BRIDGE_CLAUDE_BIN` (the `claude` CLI install calls).
 
 ## Commands
 
@@ -111,6 +113,7 @@ Environment overrides: `AGENT_BRIDGE_HOME` (daemon state), `AGY_CONFIG_DIR`, `AG
 | `agent-bridge monitor` | Claude plugin monitor: one line per message for this session |
 | `agent-bridge claude [--as name] [claude args]` | Launch Claude Code with a channel instead of the monitor |
 | `agent-bridge listen --as <name>` | agy: wait for one message, print it, exit |
+| `agent-bridge opencode-stream` | opencode plugin stream: one JSON line per message for the session in `OPENCODE_SESSION_ID` |
 | `agent-bridge mcp <kind>` | MCP server for one agent kind (`claude`, `agy`) |
 | `agent-bridge agy-hook` | agy PreInvocation hook |
 | `agent-bridge daemon` | Hub process |
@@ -128,6 +131,6 @@ Layout and conventions: `AGENTS.md`. Design history, findings and rejected appro
 
 ## Limits
 
-- Adapters exist for Claude Code and agy only. `docs/design.md` covers adding another.
+- Adapters exist for Claude Code, agy and opencode (v2 plugin API, beta). `docs/design.md` covers adding another.
 - The opt-in channel path shows a development-channel notice at every `agent-bridge claude` launch. The default monitor path has none.
 - Open questions are listed in `docs/design.md`.
