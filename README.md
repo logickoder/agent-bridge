@@ -39,7 +39,7 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 
 | Kind | Wake | Identity |
 |---|---|---|
-| `claude` | Channel push into the live session (`notifications/claude/channel`) | `CLAUDE_CODE_SESSION_ID`, which Claude sets for MCP servers. `claude-bridge` passes the name (`--as`) or the auto-name base to the server |
+| `claude` | Channel push into the live session (`notifications/claude/channel`) | `CLAUDE_CODE_SESSION_ID`, which Claude sets for MCP servers. `claude-bridge` passes the name (`--as`) or the project folder to the server |
 | `agy` | A background `agent-bridge listen` exits when a message arrives, which wakes agy. A PreInvocation hook injects queued messages as a fallback | `ANTIGRAVITY_CONVERSATION_ID`, set by agy in `run_command`'s environment and sent to hooks as `conversationId` |
 
 ### Delivery rules
@@ -53,10 +53,12 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 ### Names
 
 - **Auto names, the way Claude names sessions.** Without a name, a session gets `<folder>-<kind>`, e.g. `bankstract-claude` and `bankstract-agy`. The daemon assigns it on `claim`, so two sessions starting at once never collide.
+- **If the name cannot be claimed** (daemon down at launch), the Claude server still starts, send-only, and its instructions say why.
 - **Never reused while held.** A new session gets the lowest free `-2`, `-3`, even when the holder is offline. The same session, including a resumed one, always gets the same name.
-- **Pruned after a day.** A peer with nothing queued and no listen, ack or drain for 24 hours is dropped, and its name is free again.
+- **Pruned when idle.** A peer nobody listens on is dropped after 24 hours without a listen, ack or drain, or after 7 days if messages are queued (they are dropped too, and the daemon log says so). Pruning runs when a name is claimed, never at daemon startup, so a restart does not drop sessions that have not reconnected yet.
+- **Auto names stay with their session.** Another session cannot `listen` on one; it gets an error pointing to `join`. After `/bridge off`, the same session rejoining gets its old name back.
 - **Explicit names are roles.** `claude-bridge --as reviewer` or `/bridge planner` take the name, superseding any other session that held it.
-- **Finding your name.** Claude: the MCP instructions say "You are peer ...", and `peers` marks it "you". agy: `agent-bridge join` prints it. Any agent shell: `agent-bridge whoami`. (In Claude, the session id can change during a long session, so `whoami` there can miss; ask Claude instead.)
+- **Finding your name.** Claude: the MCP instructions say "You are peer ...", and `peers` marks it "you". agy: `agent-bridge join` prints it. Any agent shell: `agent-bridge whoami`. (In Claude, the session id can change during a long session, so `whoami` there can miss; ask Claude instead. If Claude ever stops setting `CLAUDE_CODE_SESSION_ID`, the server keys on its pid, and each server restart gets a new name.)
 - **Names change across restarts.** A send to a peer that is not listening says who is, so the sender can redirect.
 
 ### Binding

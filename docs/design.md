@@ -52,7 +52,8 @@ Target: agy (Antigravity CLI) 1.4.12, Claude Code 2.1.316, macOS.
 | Hub is pure, store injected | Delivery and binding rules are unit-tested without sockets or disk |
 | Strict TypeScript, zod at boundaries, tsc to `dist/` | The code grew past what one untyped file holds. Follows the owner's TypeScript rules |
 | Auto names `<folder>-<kind>[-n]`, never reused while held | Same model as Claude's own session names. No takeover or "is it still active" guesswork for defaults. The daemon assigns names (`claim`) so concurrent starts cannot collide. Explicit names keep takeover for stable roles |
-| Prune idle peers after 24h | Auto names would otherwise pile up. Only peers with an empty queue and no listener are dropped |
+| Prune idle peers: 24h, or 7 days with mail queued | Auto names would otherwise pile up, and a dead peer that keeps receiving would never free its name. Never at startup: listeners have not reconnected. `lastSeen` writes are throttled against the stored value |
+| Auto names are locked to their session | Explicit names allow takeover, auto names do not: a stale session re-arming would otherwise steal a name re-claimed after pruning |
 | Claude keyed on `CLAUDE_CODE_SESSION_ID` | Claude sets it for MCP servers (checked in the process env). A resumed session keeps its name. Seen to differ between servers of one long-lived session, so `whoami` from Claude's shell can miss |
 | Single-instance lock file | Bridge finding 1. The pid goes into a temp file that is hard-linked into place, so the lock never exists empty. A stale lock is renamed aside and checked before takeover. An empty lock is refused until it is 5s old |
 | Hook drain is acked after print | The hook's 1.5s cap or agy's 3s kill could fire between drain and print. Drain no longer removes; `ack-drained` does |
