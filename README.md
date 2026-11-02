@@ -12,7 +12,7 @@ node dist/cli.js install          # once per machine
 
 Then, in Claude Code or agy, type `/bridge` (auto name `<folder>-claude` or `<folder>-agy`) or `/bridge planner`. Ask any session to message another by name. `/bridge <new name>` renames, `/bridge off` leaves. `agent-bridge uninstall` removes everything.
 
-Claude Code needs no special launch: `/bridge` comes from the agent-bridge plugin that `install` registers. Claude may list it as `/agent-bridge:bridge`.
+Claude Code needs no special launch: `/bridge` comes from the agent-bridge plugin that `install` registers. Claude may list it as `/agent-bridge:bridge`. Messages then arrive through the session's inbox socket. Prefer the monitor? Use `/agent-bridge:bridge-monitor`. A session in bypass-permissions mode holds socket messages for your approval, as Claude does for any message from another session; use the monitor or a channel there.
 
 Requires Node 22+ and pnpm.
 
@@ -34,7 +34,7 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 
 | Kind | Wake | Identity |
 |---|---|---|
-| `claude` | Default: the plugin's monitor prints one line per message, which Claude Code delivers as a monitor event that wakes an idle session. Opt-in: a channel push (see below) | `CLAUDE_CODE_SESSION_ID`, which Claude sets for Bash, monitors and MCP servers |
+| `claude` | Pick one. **Socket (default):** `/bridge` runs `join`, which registers the session's inbox socket (`CLAUDE_CODE_MESSAGING_SOCKET`); the daemon posts each message there and Claude shows it as a message from another session, waking an idle session. **Monitor:** `/agent-bridge:bridge-monitor` starts the plugin monitor, one line per message as a monitor event. **Channel:** launch with `agent-bridge claude` (see below) | `CLAUDE_CODE_SESSION_ID`, which Claude sets for Bash, monitors and MCP servers |
 | `agy` | Default: `join` registers agy's agentapi endpoint (address and CSRF token from `run_command`'s environment, kept in daemon memory only) and the daemon delivers each message with `agy agentapi send-message`, which wakes an idle agy. Fallbacks: a background `agent-bridge listen` whose exit wakes agy, and a PreInvocation hook that injects queued messages | `ANTIGRAVITY_CONVERSATION_ID`, set by agy in `run_command`'s environment and sent to hooks as `conversationId` |
 
 ### Delivery rules
@@ -67,16 +67,16 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 - `agent-bridge leave <name>` (what `/bridge off` runs) unbinds the name and ends its listeners with a "do not re-arm" notice.
 - A name belongs to one kind. A Claude peer and an agy peer cannot share one.
 
-### Channels instead of the monitor (opt-in)
+### Channels (opt-in)
 
-A Claude Code channel pushes messages straight into the session instead of through a monitor. It needs a launch flag, `--dangerously-load-development-channels server:agent-bridge`, and Claude prints a development-channel notice at every launch. No setting can enable it (checked in the Claude Code docs, 2026-11-02).
+A Claude Code channel pushes messages straight into the session, as an alternative to the socket and the monitor. It needs a launch flag, `--dangerously-load-development-channels server:agent-bridge`, and Claude prints a development-channel notice at every launch. No setting can enable it (checked in the Claude Code docs, 2026-11-02).
 
 ```sh
 agent-bridge claude [--as name] [claude args]    # launch Claude with the channel
 alias cb='agent-bridge claude'                    # if you use it often
 ```
 
-It also prints "server:agent-bridge · no MCP server configured with that name" at launch, yet receives: the server comes from `--mcp-config` and seems to register after the check. Run either the channel or `/bridge` in one session, not both; a second stream listener for a session is refused.
+It also prints "server:agent-bridge · no MCP server configured with that name" at launch, yet receives: the server comes from `--mcp-config` and seems to register after the check. Use one receive path per session. A second one is refused, and `join` says so.
 
 Do not register the channel server at user scope. Claude does not tell a server whether channels are on. Without `AGENT_BRIDGE_PEER` or `AGENT_BRIDGE_FOLDER`, the server only sends and never consumes.
 
@@ -106,7 +106,7 @@ Environment overrides: `AGENT_BRIDGE_HOME` (daemon state), `AGY_CONFIG_DIR`, `AG
 | `agent-bridge send [--as me] <to> <text>` | Send from the shell (sender `shell` by default) |
 | `agent-bridge leave <name>` | Unbind a peer and stop its listeners |
 | `agent-bridge restart` | Stop the daemon. The next client starts it |
-| `agent-bridge join [name] [--kind k]` | Bind this session's name (auto by default; a name renames) and print it. `--kind` is needed when the shell has both agents' session ids |
+| `agent-bridge join [name] [--kind k] [--no-push]` | Bind this session's name (auto by default; a name renames), register direct delivery, and print it. `--kind` is needed when the shell has both agents' session ids. `--no-push` receives by listening (monitor mode, agy listener) |
 | `agent-bridge monitor` | Claude plugin monitor: one line per message for this session |
 | `agent-bridge claude [--as name] [claude args]` | Launch Claude Code with a channel instead of the monitor |
 | `agent-bridge listen --as <name>` | agy: wait for one message, print it, exit |
