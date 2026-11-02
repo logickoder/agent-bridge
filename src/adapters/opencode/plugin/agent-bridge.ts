@@ -95,9 +95,16 @@ export function createPlugin(deps: { exec: Exec; spawn: Spawn }) {
           name: 'bridge_join',
           description:
             'Join agent-bridge, which links this opencode session to other agent sessions (Claude Code, agy, other opencode sessions) as named peers. Call when the user asks to join the bridge, optionally with a name. Calling it again with a new name renames this session.',
-          input: { type: 'object', properties: { name: { type: 'string', description: 'Peer name. Omit for the automatic <folder>-opencode.' } }, additionalProperties: false },
+          input: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Peer name. Omit for the automatic <folder>-opencode.' },
+              take: { type: 'boolean', description: 'Take the name even if another session is online with it. Only when the user asks.' },
+            },
+            additionalProperties: false,
+          },
           execute: async (input, context) => {
-            const args = ['join', '--kind', 'opencode', ...(typeof input['name'] === 'string' ? [input['name']] : [])]
+            const args = ['join', '--kind', 'opencode', ...(input['take'] === true ? ['--take'] : []), ...(typeof input['name'] === 'string' ? [input['name']] : [])]
             const out = await deps.exec(args, envFor(context.sessionID), cwd)
             const name = /Joined agent-bridge as "([^"]+)"/.exec(out)?.[1]
             if (name) names.set(context.sessionID, name)

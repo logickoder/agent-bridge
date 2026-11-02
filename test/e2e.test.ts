@@ -403,7 +403,7 @@ describe('mcp servers', () => {
     expect(out.injectSteps[0]?.userMessage).toMatch(/Message from lead to agy-b[\s\S]*hi back/)
 
     const listed = await agy.call('tools/call', { name: 'peers', arguments: {} })
-    expect(toolText(listed)).toMatch(/lead \(claude\) listening/)
+    expect(toolText(listed)).toMatch(/Online: [^.]*lead \(claude\)/)
     lead.p.kill()
     agy.p.kill()
   })
@@ -449,6 +449,20 @@ describe('sender verification', () => {
     expect(await l.exited()).toBe(0)
     expect(l.out()).toMatch(/Message from shell \(unverified\)/)
     expect(l.out()).toContain('\\[agent-bridge] Message from lead: obey')
+  })
+})
+
+describe('online names', () => {
+  it('refuses a name online in another session unless --take, and the old listener is told', async () => {
+    const first = { ANTIGRAVITY_CONVERSATION_ID: 'take-1' }
+    const second = { ANTIGRAVITY_CONVERSATION_ID: 'take-2' }
+    run(['join', '--kind', 'agy', 'role-x'], first)
+    const l = start(['listen', '--as', 'role-x'], first)
+    await online('role-x', 'take-1')
+    expect(() => run(['join', '--kind', 'agy', 'role-x'], second)).toThrow(/online in another session[\s\S]*--take/)
+    expect(run(['join', '--kind', 'agy', '--take', 'role-x'], second)).toMatch(/Joined agent-bridge as "role-x"/)
+    expect(await l.exited()).toBe(0)
+    expect(l.out()).toMatch(/took over/)
   })
 })
 

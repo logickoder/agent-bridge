@@ -54,6 +54,8 @@ export const Request = z.discriminatedUnion('op', [
     name: PeerName.optional(),
     kind: PeerKind,
     session: z.string().min(1),
+    /** Take `name` even if another session is online with it. Without it, an online name is refused. */
+    take: z.boolean().optional(),
   }).refine(r => (r.folder === undefined) !== (r.name === undefined), 'claim needs exactly one of `folder` or `name`.'),
   /** `sessions`: the sender's agent session ids. With them, `from` must be a name one of them holds. */
   z.object({ op: z.literal('send'), from: PeerName, to: PeerName, text: z.string().trim().min(1), sessions: z.array(z.string().min(1)).optional() }),

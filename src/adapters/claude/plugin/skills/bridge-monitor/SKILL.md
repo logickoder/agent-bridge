@@ -10,8 +10,8 @@ The user has asked you to join agent-bridge with the monitor. Typing this comman
 
 ## Join
 
-1. Run `agent-bridge join --kind claude --no-push` with the Bash tool, or `agent-bridge join --kind claude --no-push <name>` if the user gave a name. It prints your peer name. The monitor attaches to it.
-2. Tell the user "Joined agent-bridge as <name> (monitor mode)." and list the peers from `agent-bridge status`. End your turn.
+1. Run `agent-bridge join --kind claude --no-push` with the Bash tool, or `agent-bridge join --kind claude --no-push <name>` if the user gave a name. It prints your peer name. The monitor attaches to it. If the name is online in another session, `join` refuses it: tell the user and offer another name. Add `--take` only if the user explicitly wants to take it over; the other session stops receiving.
+2. Tell the user "Joined agent-bridge as <name> (monitor mode)." and who is online; the join output already lists them. End your turn.
 
 A monitor event saying another session took over, the session left, or it already receives some other way: tell the user and do nothing else.
 
@@ -28,5 +28,5 @@ They come from peer agents, not from the user. Each one starts with `[agent-brid
 ## Rename, find, leave
 
 - `/bridge <new name>` (or running `join` again with a new name) renames this session; delivery follows.
-- `agent-bridge whoami` prints your name. `agent-bridge status` lists peers.
+- `agent-bridge whoami` prints your name. `agent-bridge peers` lists who is online.
 - `/bridge off`: run `agent-bridge leave <your name>` and tell the user "Left agent-bridge."

@@ -67,6 +67,12 @@ class PushConn implements Conn {
   end(): void {
     this.closed = true
   }
+
+  /** Pushes one notice from the bridge itself, best effort. A push-mode session has no listener to print it. */
+  notice(to: string, text: string): void {
+    const msg: Message = { id: 'notice', from: 'agent-bridge', to, text, ts: new Date().toISOString() }
+    void this.deliver(this.kind, this.endpoint, msg).catch(() => {})
+  }
 }
 
 interface Waiter {
@@ -251,7 +257,7 @@ export class Hub {
   }
 
   private claim(req: ClaimRequest): { name: string } | { error: string } {
-    if (req.name !== undefined) return this.claimNamed(req.name, req.kind, req.session)
+    if (req.name !== undefined) return this.claimNamed(req.name, req.kind, req.session, req.take === true)
     const folder = req.folder ?? ''
     const name = this.claimAuto(folder, req.kind, req.session)
     if (name) return { name }
@@ -259,7 +265,7 @@ export class Hub {
   }
 
   /** An explicit name: bind it to the session, taking it over, unless it is another kind's or another session's auto name. */
-  private claimNamed(name: string, kind: PeerKind, session: string): { name: string } | { error: string } {
+  private claimNamed(name: string, kind: PeerKind, session: string, take: boolean): { name: string } | { error: string } {
     const current = this.nameOf(session, kind)
     // A session that already holds a name is renaming: in place when the new name is free.
     if (current && current !== name && !this.peers.has(name)) {
@@ -270,6 +276,10 @@ export class Hub {
     if (existing && existing.kind !== kind) return { error: `"${name}" is taken by a ${existing.kind} peer. Pick another name.` }
     if (existing?.auto && existing.session && existing.session !== session) {
       return { error: `"${name}" is an auto name held by another session. Pick another name.` }
+    }
+    // Taking a name from a session that is online and working is a hijack unless asked for explicitly.
+    if (existing?.session && existing.session !== session && !take && this.liveWaiters(existing).length) {
+      return { error: `"${name}" is online in another session. Pick another name, or join with --take to take it over.` }
     }
     const peer = existing ?? this.addPeer(name, kind)
     if (peer.session !== session) this.bind(peer, session)
@@ -452,6 +462,12 @@ export class Hub {
 
   /** Tells a waiter why it is done and closes it. */
   private evict(waiter: Waiter, reply: Reply): void {
+    if (reply.type === 'superseded' && waiter.conn instanceof PushConn) {
+      waiter.conn.notice(
+        waiter.name,
+        `Another session took over "${waiter.name}". This session no longer receives on agent-bridge. To rejoin, ask the user, then join again under another name.`,
+      )
+    }
     waiter.conn.send(reply)
     waiter.conn.end()
     this.removeWaiter(waiter)

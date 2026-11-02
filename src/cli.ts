@@ -2,7 +2,7 @@
 import { ADAPTERS } from './adapters/index.js'
 import type { Command } from './adapters/types.js'
 import { request, resolveName, stopDaemon } from './client/index.js'
-import { formatSent } from './format.js'
+import { formatPeers, formatSent } from './format.js'
 import { peerName, takeFlag } from './lib/args.js'
 import { toError } from './lib/errors.js'
 import { logger } from './lib/log.js'
@@ -18,7 +18,8 @@ const USAGE = [
   '',
   '  install | uninstall            set up or remove PATH links and every agent\'s config',
   '  status                         peers, bindings, queues',
-  '  join [name] [--kind k] [--no-push]  bind this session\'s name (auto: <folder>-<kind>; a name renames); --no-push: receive by listening',
+  '  join [name] [--kind k] [--no-push] [--take]  bind this session\'s name (auto: <folder>-<kind>; a name renames); --take: take a name online elsewhere',
+  '  peers [--all]                  who is online (offline ones counted; --all lists everyone)',
   '  whoami                         this session\'s peer name(s), from the agent\'s session id',
   '  send [--as me] <to> <text...>  send from the shell (sender "shell" by default)',
   '  leave <name>                   unbind a peer and stop its listeners',
@@ -72,11 +73,13 @@ async function main(argv: string[]): Promise<void> {
     case 'join': {
       const noPush = args.includes('--no-push')
       if (noPush) args.splice(args.indexOf('--no-push'), 1)
+      const take = args.includes('--take')
+      if (take) args.splice(args.indexOf('--take'), 1)
       const kindFlag = takeFlag(args, '--kind')
       const adapter = kindFlag === undefined ? sessionAdapter() : ADAPTERS[PeerKind.parse(kindFlag)]
       const identity = args[0] === undefined ? { folder: process.cwd() } : { name: peerName(args[0], 'Name') }
       const session = process.env[adapter.sessionEnv]
-      const name = await resolveName(identity, adapter.kind, session)
+      const name = await resolveName(identity, adapter.kind, session, { take })
       const endpoint = session && !noPush ? await adapter.pushEndpoint?.(process.env) : undefined
       let pushed = false
       let note = ''
@@ -88,7 +91,12 @@ async function main(argv: string[]): Promise<void> {
           note = `\nDirect delivery not registered: ${toError(err).message}`
         }
       }
-      return out(`Joined agent-bridge as "${name}".\n${await adapter.joined(name, pushed)}${note}`)
+      const { peers: list } = await request({ op: 'status' }, 'status')
+      return out(`Joined agent-bridge as "${name}".\n${await adapter.joined(name, pushed)}${note}\n${formatPeers(list, { self: name })}`)
+    }
+    case 'peers': {
+      const { peers: list } = await request({ op: 'status' }, 'status')
+      return out(formatPeers(list, { all: args.includes('--all') }))
     }
     case 'whoami': {
       const sessions = adapters.flatMap(a => {

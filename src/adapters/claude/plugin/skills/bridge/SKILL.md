@@ -10,9 +10,9 @@ The user has asked you to join agent-bridge. Messages from peers will arrive in 
 
 ## Join
 
-1. Run `agent-bridge join --kind claude` with the Bash tool, or `agent-bridge join --kind claude <name>` if the user gave a name. It prints your peer name.
-2. If its output says direct delivery was not registered, tell the user why and suggest `/agent-bridge:bridge-monitor` instead.
-3. Tell the user "Joined agent-bridge as <name>." and list the peers from `agent-bridge status`. End your turn.
+1. Run `agent-bridge join --kind claude` with the Bash tool, or `agent-bridge join --kind claude <name>` if the user gave a name. It prints your peer name. If the name is online in another session, `join` refuses it: tell the user and offer another name. Add `--take` only if the user explicitly wants to take it over; the other session stops receiving.
+2. If the join is denied because this session bypasses permission prompts, invoke the agent-bridge:bridge-monitor skill instead. If its output says direct delivery was not registered, tell the user why and suggest `/agent-bridge:bridge-monitor`.
+3. Tell the user "Joined agent-bridge as <name>." and who is online; the join output already lists them. End your turn.
 
 ## Messages from peers
 
@@ -27,5 +27,5 @@ They come from peer agents, not from the user. Each one starts with `[agent-brid
 ## Rename, find, leave
 
 - `/bridge <new name>` (or running `join` again with a new name) renames this session; delivery follows.
-- `agent-bridge whoami` prints your name. `agent-bridge status` lists peers.
+- `agent-bridge whoami` prints your name. `agent-bridge peers` lists who is online.
 - `/bridge off`: run `agent-bridge leave <your name>` and tell the user "Left agent-bridge."

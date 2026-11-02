@@ -667,3 +667,40 @@ describe('resume findings', () => {
     expect(logs.join('\n')).not.toContain('raw-session-id')
   })
 })
+
+describe('taking an online name', () => {
+  it('refuses an explicit name that is online in another session, and says how to take it', () => {
+    const { call, listen, hub } = setup()
+    const held = listen('reviewer', 'claude', 'c1', true)
+    expect(call({ op: 'claim', kind: 'claude', session: 'c2', name: 'reviewer' }).last()).toMatchObject({
+      type: 'error',
+      message: expect.stringMatching(/online in another session[\s\S]*--take/),
+    })
+    expect(held.closed).toBe(false)
+    expect(hub.status().find(p => p.name === 'reviewer')?.session).toBe('c1')
+  })
+
+  it('takes over an explicit name whose holder is offline, without asking', () => {
+    const { call, listen, hub } = setup()
+    listen('reviewer', 'claude', 'c1', true).end()
+    expect(call({ op: 'claim', kind: 'claude', session: 'c2', name: 'reviewer' }).last()).toEqual({ type: 'claimed', name: 'reviewer' })
+    expect(hub.status().find(p => p.name === 'reviewer')?.session).toBe('c2')
+  })
+
+  it('takes an online name with take, and the old listener is told', () => {
+    const { call, listen } = setup()
+    const held = listen('reviewer', 'claude', 'c1', true)
+    expect(call({ op: 'claim', kind: 'claude', session: 'c2', name: 'reviewer', take: true }).last()).toEqual({ type: 'claimed', name: 'reviewer' })
+    expect(held.last()).toEqual({ type: 'superseded', by: 'c2' })
+  })
+
+  it('sends a push-mode holder a takeover notice before dropping its endpoint', async () => {
+    const texts: string[] = []
+    const { call } = setup(memoryStore(), () => {}, async (_kind, _endpoint, msg) => void texts.push(msg.text))
+    call({ op: 'claim', kind: 'agy', session: 's1', name: 'planner' })
+    call({ op: 'push', kind: 'agy', session: 's1', endpoint: {} })
+    call({ op: 'claim', kind: 'agy', session: 's2', name: 'planner', take: true })
+    await new Promise(r => setTimeout(r, 0))
+    expect(texts.join('\n')).toMatch(/Another session took over "planner"/)
+  })
+})

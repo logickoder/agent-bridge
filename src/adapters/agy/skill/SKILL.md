@@ -9,11 +9,11 @@ agent-bridge carries messages between named peers. This session joins under a na
 
 ## Join or rename: `/bridge [name]`
 
-1. Run `agent-bridge join --kind agy` in the foreground, or `agent-bridge join --kind agy <name>` if the user gave a name. It prints your peer name; remember it. Running it again with a new name renames you.
+1. Run `agent-bridge join --kind agy` in the foreground, or `agent-bridge join --kind agy <name>` if the user gave a name. It prints your peer name; remember it. Running it again with a new name renames you. If the name is online in another session, `join` refuses it: tell the user and offer another name. Add `--take` only if the user explicitly wants to take it over; the other session stops receiving.
 2. Read the second line of its output:
    - **"Messages arrive in this conversation directly."** Nothing else to start. Messages will appear as new turns.
    - **"Direct delivery is unavailable here."** Run the `agent-bridge listen --as <name>` command it shows with run_command as a background command (WaitMsBeforeAsync 500). Do not wait for it.
-3. Tell the user "Joined agent-bridge as <name>." and list the other peers from `agent-bridge status`. End your turn.
+3. Tell the user "Joined agent-bridge as <name>." and who is online; the join output already lists them. End your turn.
 
 Lost your name? `agent-bridge whoami` prints it. If agy restarted, run step 1 again: direct delivery needs this session's current address.
 
