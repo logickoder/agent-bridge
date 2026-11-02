@@ -21,7 +21,7 @@
 | `src/lib/` | Generic helpers, no bridge logic: `errors` (errno codes, `toError`, `isDaemonDown`), `json-file` (validated read, atomic write), `log` (tagged stderr), `wire` (JSON lines), `args`, `config` (other tools' config and PATH links) |
 | `src/adapters/types.ts` | The `Adapter` interface every agent kind implements |
 | `src/adapters/index.ts` | `ADAPTERS` registry, typed `Record<PeerKind, Adapter>` |
-| `src/adapters/<kind>/` | Everything agent-specific. `index.ts` exports the adapter and is the folder's only entry point. The rest is split by concern: `mcp.ts`, `install.ts`, `names.ts` (constants), and the wake path (`agy/listen.ts`, `agy/hook.ts`, `agy/format.ts`, `claude/monitor.ts`, `claude/format.ts`, `claude/launch.ts`) |
+| `src/adapters/<kind>/` | Everything agent-specific. `index.ts` exports the adapter and is the folder's only entry point. The rest is split by concern: `mcp.ts`, `install.ts`, `names.ts` (constants), and the wake path (`agy/push.ts`, `agy/listen.ts`, `agy/hook.ts`, `agy/format.ts`, `claude/monitor.ts`, `claude/format.ts`, `claude/launch.ts`) |
 | `src/adapters/agy/skill/` | The agy `/bridge` skill, copied by install |
 | `src/adapters/claude/plugin/` | The Claude plugin: `/bridge` skill and the monitor. Registered by install through the repo's `.claude-plugin/marketplace.json` |
 | `test/` | Tests that touch real files, sockets or processes. `e2e.test.ts` runs against `dist/cli.js` |

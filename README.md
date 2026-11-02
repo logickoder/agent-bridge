@@ -12,7 +12,7 @@ node dist/cli.js install          # once per machine
 
 Then, in Claude Code or agy, type `/bridge` (auto name `<folder>-claude` or `<folder>-agy`) or `/bridge planner`. Ask any session to message another by name. `/bridge <new name>` renames, `/bridge off` leaves. `agent-bridge uninstall` removes everything.
 
-Claude Code needs no special launch: `/bridge` comes from the agent-bridge plugin that `install` registers.
+Claude Code needs no special launch: `/bridge` comes from the agent-bridge plugin that `install` registers. Claude may list it as `/agent-bridge:bridge`.
 
 Requires Node 22+ and pnpm.
 
@@ -35,7 +35,7 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 | Kind | Wake | Identity |
 |---|---|---|
 | `claude` | Default: the plugin's monitor prints one line per message, which Claude Code delivers as a monitor event that wakes an idle session. Opt-in: a channel push (see below) | `CLAUDE_CODE_SESSION_ID`, which Claude sets for Bash, monitors and MCP servers |
-| `agy` | A background `agent-bridge listen` exits when a message arrives, which wakes agy. A PreInvocation hook injects queued messages as a fallback | `ANTIGRAVITY_CONVERSATION_ID`, set by agy in `run_command`'s environment and sent to hooks as `conversationId` |
+| `agy` | Default: `join` registers agy's agentapi endpoint (address and CSRF token from `run_command`'s environment, kept in daemon memory only) and the daemon delivers each message with `agy agentapi send-message`, which wakes an idle agy. Fallbacks: a background `agent-bridge listen` whose exit wakes agy, and a PreInvocation hook that injects queued messages | `ANTIGRAVITY_CONVERSATION_ID`, set by agy in `run_command`'s environment and sent to hooks as `conversationId` |
 
 ### Delivery rules
 
@@ -44,6 +44,7 @@ Every peer has a name, a kind (`claude` or `agy`) and, once it listens, a bound 
 - The agy hook removes messages only after it has printed them. If it hits its time cap first, they stay queued. A failed ack shows them again next turn: a duplicate, never a loss.
 - `send` reports "Delivered live" only when the message went out at once. One queued behind a message in flight reports "Queued".
 - One daemon at a time, enforced by a lock file. Clients start it on demand.
+- A push endpoint (agy) is acked only when `send-message` succeeds. A failure keeps the message queued, drops the endpoint, and the fallbacks take over. Endpoints live in daemon memory, so after a daemon or agy restart, run `/bridge` again to restore direct delivery.
 
 ### Names
 

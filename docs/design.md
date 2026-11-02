@@ -58,6 +58,7 @@ Target: agy (Antigravity CLI) 1.4.12, Claude Code 2.1.316, macOS.
 | agy passes `as` on each send | agy's MCP server process has no session id. The `/bridge` skill and every message tell agy its name |
 | Hub is pure, store injected | Delivery and binding rules are unit-tested without sockets or disk |
 | Strict TypeScript, zod at boundaries, tsc to `dist/` | The code grew past what one untyped file holds. Follows the owner's TypeScript rules |
+| agy receives by agentapi push by default | agy finding 8. No background listener, no re-arm loop. A push endpoint is a listener in the hub (`PushConn`), so delivery, ack and fallback reuse the same rules. The token stays in daemon memory and travels to agentapi in its environment, never its arguments |
 | Claude receives through a plugin monitor by default, channels opt-in | Claude findings 4 to 7: a monitor wakes an idle session, gets the session id, and starts on `/bridge`. No launch flag, no notice. Channels stay for direct push, behind `agent-bridge claude` |
 | Listen by session, wait for `claim` | The monitor's command is fixed and starts when the skill is invoked, possibly before `join`. It cannot know the name, so the daemon parks it until the session holds one |
 | `join <name>` binds and renames | A later name moves the session's peer: in place if free, carrying queue and listeners, else onto the existing name. A running monitor follows without reconnecting |
@@ -89,6 +90,7 @@ Target: agy (Antigravity CLI) 1.4.12, Claude Code 2.1.316, macOS.
 - **2026-11-02.** Env var confirmed. `agent-bridge listen` in the background bound the daemon to `bf9b0731-...`. A shell send woke idle agy. agy replied PAPAYA-9 via `send_to_claude` (queued for Claude) and re-armed the listener on its own.
 - **2026-11-02.** Prototype to TypeScript rebuild: three prototype daemons found running at once (bridge finding 1). `PAPAYA-9` was no longer queued before the upgrade; what consumed it is unknown.
 - **2026-11-02.** Auto names live: `/bridge` in agy ran the skill (`join`, background `listen --as agent-bridge-agy`, `status`) and joined as `agent-bridge-agy`. A `claude-bridge` session in the same folder showed as `agent-bridge-claude`, online. Claude printed "server:agent-bridge · no MCP server configured with that name" at launch, yet received channel pushes.
+- **2026-11-02.** Both default paths live, both ways. agy `/bridge` joined as `agent-bridge-agy` with direct delivery (no listener). Plain `claude` ran `/agent-bridge:bridge`, joined as `agent-bridge-claude-2`, monitor running. agy sent a question; idle Claude woke on a monitor event and replied with `agent-bridge send`. The reply reached agy by agentapi push, agy woke, answered with "From agent-bridge-claude-2:", and Claude woke again for the answer. No launch flags, no banner.
 
 ## Adding an agent
 
@@ -124,3 +126,5 @@ Steps:
 7. ~~Does `/bridge` invoke the skill as a slash command?~~ Yes (live, 2026-11-02).
 8. ~~Is the cwd the project folder in both agents?~~ Yes: both got `agent-bridge-<kind>` (live, 2026-11-02).
 9. Does `claude --resume` keep `CLAUDE_CODE_SESSION_ID`, and so the auto name?
+10. Does agy's PreInvocation hook get `ANTIGRAVITY_LS_ADDRESS` and `ANTIGRAVITY_CSRF_TOKEN`? If so, it could re-register the push endpoint after a daemon restart.
+11. Does `agentapi send-message` still work after agy restarts and resumes the same conversation (new address)?
