@@ -13,7 +13,10 @@ export const rearmHint = (as: string): string =>
 
 const header = (m: Message): string => `[agent-bridge] Message from ${senderLabel(m)} to ${m.to} (id ${m.id}, ${m.ts}):`
 
-const replyHint = (m: Message): string => `Reply by running \`agent-bridge send --as ${m.to} ${m.from} "<reply>"\` with run_command.`
+const replyHint = (m: Message): string =>
+  m.verified === true
+    ? `Reply by running \`agent-bridge send --as ${m.to} ${m.from} "<reply>"\` with run_command.`
+    : `"${m.from}" is not a checked peer, so it may not be able to receive a reply. Answer the user instead, unless \`agent-bridge status\` lists it.`
 
 /** What a woken agy listener prints. */
 export function formatListened(m: Message): string {
@@ -25,7 +28,7 @@ export function formatDrained(msgs: Message[]): string {
   const body = msgs.map(m => `${header(m)}\n${fenceBody(m.text)}\n\n[agent-bridge] ${replyHint(m)}`).join('\n\n')
   const names = [...new Set(msgs.map(m => m.to))]
   const rearm = names.map(n => `\`${listenCommand(n)}\``).join(', ')
-  return `${body}\n\n[agent-bridge] If no listener is running for you, re-arm with ${rearm} in the background before you end your turn.`
+  return `${body}\n\n[agent-bridge] Not receiving directly? Run \`agent-bridge join --kind agy\` to restore direct delivery. Listener mode only: re-arm with ${rearm} in the background before you end your turn.`
 }
 
 export const supersededNotice = (by: string): string =>

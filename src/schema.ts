@@ -79,7 +79,8 @@ export const Reply = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), message: z.string() }),
   z.object({ type: z.literal('claimed'), name: PeerName }),
   /** `listening`: other peers online now, filled when the recipient is not, so the sender can redirect. */
-  z.object({ type: z.literal('sent'), id: z.string(), live: z.boolean(), queued: z.number(), listening: z.array(PeerName).default([]) }),
+  /** `pushed`: handed to a push endpoint; it arrives unless that delivery fails, then it waits in the queue. */
+  z.object({ type: z.literal('sent'), id: z.string(), live: z.boolean(), pushed: z.boolean().default(false), queued: z.number(), listening: z.array(PeerName).default([]) }),
   /** `rejoin`: the session is bound but has no push endpoint (lost on a daemon restart). Set once per daemon run. */
   z.object({ type: z.literal('drained'), msgs: z.array(Message), rejoin: z.boolean().default(false) }),
   z.object({ type: z.literal('status'), pid: z.number(), peers: z.array(PeerStatus) }),

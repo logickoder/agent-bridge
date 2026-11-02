@@ -210,7 +210,7 @@ export class Hub {
     let refused: string | undefined
     const conn = new PushConn(this, deliver, kind, endpoint, (c, why) => {
       refused ??= why
-      this.deps.log?.(`push endpoint for session ${session} dropped: ${why}`)
+      this.deps.log?.(`push endpoint for session ${sessionTag(session)} dropped: ${why}`)
       this.dropPusher(c)
     })
     this.pushers.set(session, conn)
@@ -229,7 +229,12 @@ export class Hub {
   private dropPusher(conn: PushConn): void {
     if (conn.closed) return
     conn.closed = true
-    for (const [session, c] of this.pushers) if (c === conn) this.pushers.delete(session)
+    for (const [session, c] of this.pushers) {
+      if (c !== conn) continue
+      this.pushers.delete(session)
+      // A lost endpoint earns a fresh rejoin hint, even if one was used earlier this run.
+      this.rejoinAsked.delete(session)
+    }
     this.disconnect(conn)
   }
 
@@ -359,9 +364,13 @@ export class Hub {
     this.deps.store.saveQueue(peer.name, q)
     this.pump(peer.name)
     // Live means this message went out now, not that a listener exists: one behind an in-flight message waits.
-    const live = this.inflight.get(peer.name)?.id === msg.id
+    const head = this.inflight.get(peer.name)
+    const sentNow = head?.id === msg.id
+    // A push endpoint's delivery is still running; only a socket listener counts as live.
+    const pushed = sentNow && head.waiter.conn instanceof PushConn
+    const live = sentNow && !pushed
     const listening = this.liveWaiters(peer).length ? [] : this.othersListening([peer.name, req.from])
-    this.reply(conn, { type: 'sent', id: msg.id, live, queued: q.length, listening })
+    this.reply(conn, { type: 'sent', id: msg.id, live, pushed, queued: q.length, listening })
   }
 
   private ack(name: string, id: string): void {

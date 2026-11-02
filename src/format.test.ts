@@ -40,3 +40,10 @@ describe('fenceBody edge cases', () => {
     expect(out.match(/^--- end of message text ---$/gm)).toHaveLength(1)
   })
 })
+
+describe('formatSent for push', () => {
+  it('says handed to direct delivery, not delivered', async () => {
+    const { formatSent } = await import('./format.js')
+    expect(formatSent('agy', { id: 'x', live: false, pushed: true, queued: 1, listening: [] })).toMatch(/^Handed to agy's direct delivery \(id x\)/)
+  })
+})

@@ -142,7 +142,7 @@ describe('agy listener', () => {
     expect(peer('agy')).toMatchObject({ kind: 'agy', session: sessionTag('conv-1'), online: true })
     expect(run(['send', 'agy', 'MANGO-7'])).toMatch(/Delivered live/)
     expect(await l.exited()).toBe(0)
-    expect(l.out()).toMatch(/MANGO-7[\s\S]*agent-bridge send --as agy shell[\s\S]*agent-bridge listen --as agy/)
+    expect(l.out()).toMatch(/MANGO-7[\s\S]*"shell" is not a checked peer[\s\S]*agent-bridge listen --as agy/)
   })
 
   it('queues while offline and delivers on the next listen', async () => {
@@ -433,6 +433,11 @@ describe('mcp servers', () => {
 })
 
 describe('sender verification', () => {
+  it('sends as shell, unverified, without --as, even inside an agent session', () => {
+    run(['join', '--kind', 'agy', 'plain-target'], { ANTIGRAVITY_CONVERSATION_ID: 'ver-0' })
+    expect(run(['send', 'plain-target', 'hi'], { ANTIGRAVITY_CONVERSATION_ID: 'ver-other' })).toMatch(/Queued for plain-target|Delivered/)
+  })
+
   it('refuses a name the sending session does not hold, and marks shell sends unverified', async () => {
     run(['join', '--kind', 'agy', 'verified-agy'], { ANTIGRAVITY_CONVERSATION_ID: 'ver-1' })
     expect(() => run(['send', '--as', 'someone-else', 'verified-agy', 'spoof'], { ANTIGRAVITY_CONVERSATION_ID: 'ver-1' })).toThrow(

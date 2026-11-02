@@ -56,8 +56,9 @@ async function main(argv: string[]): Promise<void> {
       const from = args[0] === '--as' ? peerName(args[1], '--as') : 'shell'
       const [to, ...words] = args[0] === '--as' ? args.slice(2) : args
       const peer = peerName(to, 'Recipient')
-      // The agent sessions this shell belongs to. The daemon checks `from` against them.
-      const sessions = adapters.flatMap(a => {
+      // The agent sessions this shell belongs to. The daemon checks `from` against them. Without --as the
+      // sender is plain `shell`, which no session holds, so no session is attached and it goes unverified.
+      const sessions = args[0] !== '--as' ? [] : adapters.flatMap(a => {
         const id = process.env[a.sessionEnv]
         return id ? [id] : []
       })

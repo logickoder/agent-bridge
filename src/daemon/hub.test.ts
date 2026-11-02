@@ -86,7 +86,7 @@ describe('send', () => {
     listen('agy', 'agy').end()
     hub.disconnect(new FakeConn())
     const r = send('agy', 'hi').last()
-    expect(r).toEqual({ type: 'sent', id: 'm1', live: false, queued: 1, listening: [] })
+    expect(r).toEqual({ type: 'sent', id: 'm1', live: false, pushed: false, queued: 1, listening: [] })
   })
 })
 
@@ -510,7 +510,7 @@ describe('push endpoints', () => {
     const { claim, call, send, hub } = setup(memoryStore(), () => {}, rec.deliver)
     claim('/x/b', 'agy', 's1')
     expect(call({ op: 'push', kind: 'agy', session: 's1', endpoint: { conversation: 's1' } }).last()).toEqual({ type: 'ok' })
-    expect(send('b-agy', 'hi').last()).toMatchObject({ type: 'sent', live: true })
+    expect(send('b-agy', 'hi').last()).toMatchObject({ type: 'sent', live: false, pushed: true })
     expect(rec.calls.map(c => [c.kind, c.text])).toEqual([['agy', 'hi']])
     rec.calls[0]?.settle(true)
     await flush()
@@ -628,5 +628,42 @@ describe('status redaction', () => {
     expect(JSON.stringify(r)).not.toContain('secret-session-id')
     expect(JSON.stringify(r)).not.toContain('other-session')
     expect(r?.type === 'status' && r.peers.find(p => p.name === 'c-agy')?.session).toBe(sessionTag('other-session'))
+  })
+})
+
+describe('resume findings', () => {
+  it('asks to rejoin again after a push endpoint is lost, even if it asked before this run', async () => {
+    let fail = false
+    const deliver = async () => {
+      if (fail) throw new Error('exit 1')
+    }
+    const { claim, call, send } = setup(memoryStore(), () => {}, deliver)
+    claim('/x/b', 'agy', 's1')
+    expect(call({ op: 'drain', session: 's1' }).last()).toMatchObject({ rejoin: true })
+    call({ op: 'push', kind: 'agy', session: 's1', endpoint: {} })
+    fail = true
+    send('b-agy', 'lost')
+    await new Promise(r => setTimeout(r, 0))
+    expect(call({ op: 'drain', session: 's1' }).last()).toMatchObject({ rejoin: true })
+  })
+
+  it('reports a message handed to a push endpoint as pushed, not live', () => {
+    const { claim, call, send } = setup(memoryStore(), () => {}, () => new Promise(() => {}))
+    claim('/x/b', 'agy', 's1')
+    call({ op: 'push', kind: 'agy', session: 's1', endpoint: {} })
+    expect(send('b-agy', 'x').last()).toMatchObject({ type: 'sent', live: false, pushed: true })
+  })
+
+  it('logs a session tag, never the raw session id', async () => {
+    const logs: string[] = []
+    const { claim, call, send } = setup(memoryStore(), m => logs.push(m), async () => {
+      throw new Error('exit 1')
+    })
+    claim('/x/b', 'agy', 'raw-session-id')
+    call({ op: 'push', kind: 'agy', session: 'raw-session-id', endpoint: {} })
+    send('b-agy', 'x')
+    await new Promise(r => setTimeout(r, 0))
+    expect(logs.join('\n')).toMatch(/dropped/)
+    expect(logs.join('\n')).not.toContain('raw-session-id')
   })
 })
