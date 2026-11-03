@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="title">
+  <title id="title">agent-bridge</title>
+  <style>
+    .line { stroke: #1f2328; }
+    .msg { fill: #0969da; }
+    @media (prefers-color-scheme: dark) {
+      .line { stroke: #e6edf3; }
+      .msg { fill: #4493f8; }
+    }
+  </style>
+  <!-- Two agent sessions, joined by a low bridge, with a message on its way across -->
+  <g transform="translate(0 2)">
+    <g class="line" fill="none" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3.5" y="28" width="21" height="19" rx="4.5"/>
+      <rect x="39.5" y="28" width="21" height="19" rx="4.5"/>
+      <path d="M9.5 34l5 4-5 4"/>
+      <path d="M45.5 34l5 4-5 4"/>
+      <path d="M14 28 C 20 15, 44 15, 50 28"/>
+    </g>
+    <circle class="msg" cx="32" cy="18.4" r="5"/>
+  </g>
+</svg>

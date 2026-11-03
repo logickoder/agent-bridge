@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" width="960" height="420" role="img" aria-labelledby="title desc">
+  <title id="title">How agent-bridge works</title>
+  <desc id="desc">Three live agent sessions, Claude Code, Antigravity and opencode, connect to one local agent-bridge daemon. The daemon wakes each idle session through that agent's own interface: Claude Code's inbox socket, Antigravity's agentapi send-message, and an opencode plugin calling session.prompt.</desc>
+  <style>
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .bar { fill: #eaeef2; }
+    .dot { fill: #c4ccd5; }
+    .hub { fill: #ffffff; stroke: #57606a; }
+    .text { fill: #1f2328; font-family: ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+    .mono { fill: #1f2328; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .muted { fill: #57606a; }
+    .wake { stroke: #0969da; fill: none; }
+    .wake-head { fill: #0969da; }
+    .wake-label { fill: #0969da; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    @media (prefers-color-scheme: dark) {
+      .card { fill: #161b22; stroke: #30363d; }
+      .bar { fill: #21262d; }
+      .dot { fill: #484f58; }
+      .hub { fill: #0d1117; stroke: #8b949e; }
+      .text, .mono { fill: #e6edf3; }
+      .muted { fill: #8b949e; }
+      .wake { stroke: #4493f8; }
+      .wake-head { fill: #4493f8; }
+      .wake-label { fill: #4493f8; }
+    }
+  </style>
+
+  <!-- Agent sessions: one terminal card each -->
+  <g>
+    <rect class="card" x="20" y="20" width="250" height="118" rx="10" stroke-width="1.5"/>
+    <path class="bar" d="M30 21h230a9 9 0 0 1 9 9v12H21V30a9 9 0 0 1 9-9z"/>
+    <circle class="dot" cx="36" cy="32" r="4"/><circle class="dot" cx="50" cy="32" r="4"/><circle class="dot" cx="64" cy="32" r="4"/>
+    <text class="text" x="145" y="36" text-anchor="middle" font-size="13" font-weight="600">Claude Code</text>
+    <text class="mono muted" x="36" y="70" font-size="12">idle</text>
+    <text class="mono" x="36" y="94" font-size="12">› Message from myapp-agy</text>
+    <text class="mono muted" x="36" y="118" font-size="12">  waking to reply…</text>
+  </g>
+  <g>
+    <rect class="card" x="355" y="20" width="250" height="118" rx="10" stroke-width="1.5"/>
+    <path class="bar" d="M365 21h230a9 9 0 0 1 9 9v12H356V30a9 9 0 0 1 9-9z"/>
+    <circle class="dot" cx="371" cy="32" r="4"/><circle class="dot" cx="385" cy="32" r="4"/><circle class="dot" cx="399" cy="32" r="4"/>
+    <text class="text" x="480" y="36" text-anchor="middle" font-size="13" font-weight="600">Antigravity</text>
+    <text class="mono muted" x="371" y="70" font-size="12">idle</text>
+    <text class="mono" x="371" y="94" font-size="12">› Message from myapp-claude</text>
+    <text class="mono muted" x="371" y="118" font-size="12">  waking to reply…</text>
+  </g>
+  <g>
+    <rect class="card" x="690" y="20" width="250" height="118" rx="10" stroke-width="1.5"/>
+    <path class="bar" d="M700 21h230a9 9 0 0 1 9 9v12H691V30a9 9 0 0 1 9-9z"/>
+    <circle class="dot" cx="706" cy="32" r="4"/><circle class="dot" cx="720" cy="32" r="4"/><circle class="dot" cx="734" cy="32" r="4"/>
+    <text class="text" x="815" y="36" text-anchor="middle" font-size="13" font-weight="600">opencode</text>
+    <text class="mono muted" x="706" y="70" font-size="12">idle</text>
+    <text class="mono" x="706" y="94" font-size="12">› Message from myapp-agy</text>
+    <text class="mono muted" x="706" y="118" font-size="12">  waking to reply…</text>
+  </g>
+
+  <!-- Wake paths: the daemon pushes into each session through that agent's own interface -->
+  <g stroke-width="2">
+    <path class="wake" d="M400 300 C 300 260, 145 240, 145 158"/>
+    <path class="wake" d="M480 300 L 480 158"/>
+    <path class="wake" d="M560 300 C 660 260, 815 240, 815 158"/>
+  </g>
+  <path class="wake-head" d="M145 146 l-6 12 h12 z"/>
+  <path class="wake-head" d="M480 146 l-6 12 h12 z"/>
+  <path class="wake-head" d="M815 146 l-6 12 h12 z"/>
+  <text class="wake-label" x="157" y="182" font-size="12">inbox socket</text>
+  <text class="wake-label" x="468" y="182" font-size="12" text-anchor="end">agentapi send-message</text>
+  <text class="wake-label" x="803" y="182" font-size="12" text-anchor="end">plugin · session.prompt</text>
+
+  <!-- The daemon -->
+  <rect class="hub" x="340" y="300" width="280" height="76" rx="12" stroke-width="1.5"/>
+  <text class="text" x="480" y="330" text-anchor="middle" font-size="15" font-weight="600">agent-bridge daemon</text>
+  <text class="text muted" x="480" y="354" text-anchor="middle" font-size="12">named peers · disk queues · at-least-once</text>
+
+  <text class="text muted" x="480" y="408" text-anchor="middle" font-size="12">Every session sends with agent-bridge send. No polling, no headless runs, no tmux.</text>
+</svg>
