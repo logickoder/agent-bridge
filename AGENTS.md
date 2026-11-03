@@ -22,7 +22,7 @@
 | `src/adapters/types.ts` | The `Adapter` interface every agent kind implements |
 | `src/adapters/index.ts` | `ADAPTERS` registry, typed `Record<PeerKind, Adapter>` |
 | `src/adapters/<kind>/` | Everything agent-specific. `index.ts` exports the adapter and is the folder's only entry point. The rest is split by concern: `mcp.ts`, `install.ts`, `names.ts` (constants), and the wake path (`agy/push.ts`, `agy/listen.ts`, `agy/hook.ts`, `agy/format.ts`, `claude/socket.ts`, `claude/monitor.ts`, `claude/format.ts`, `claude/channel/`) |
-| `src/adapters/agy/skill/` | The agy `/bridge` skill, copied by install |
+| `src/adapters/agy/skill/` | The Antigravity `/bridge` skill, copied by install |
 | `src/adapters/opencode/plugin/` | The opencode plugin. Standalone (node built-ins only): install copies the built file into opencode's plugins folder |
 | `src/adapters/claude/plugin/` | The Claude plugin: `/bridge` (socket) and `/bridge-monitor` skills sharing `shared/peer-messages.md`, the monitor, and the bypass-guard hook. Registered by install through the repo's `.claude-plugin/marketplace.json` |
 | `docs/` | User docs (`concepts.md`, `install.md`, `agents/`) and the design record (`decisions.md`, `live-tests.md`, `adding-an-agent.md`, `open-questions.md`). Agent findings live in `docs/agents/<agent>.md`; never name a file there `claude.md`, macOS loads it as `CLAUDE.md` |
@@ -33,12 +33,13 @@
 - Gate: `pnpm check` (typecheck, unit, e2e) before calling work done.
 - Unit tests sit next to the unit (`*.test.ts`) and do no I/O. Anything that spawns processes or opens sockets goes in `test/`.
 - e2e waits on conditions (`until`, `online`), never on fixed sleeps. Fixed sleeps flaked under load.
-- An adapter's `index.ts` loads its other modules with `await import()` inside each member. `agy-hook` runs on every agy model call and must not load install, MCP or the other adapters.
+- An adapter's `index.ts` loads its other modules with `await import()` inside each member. `agy-hook` runs on every Antigravity model call and must not load install, MCP or the other adapters.
 - Shared code (`mcp/tools.ts`, `format.ts`, `daemon/`) never names an agent kind, command or default name. Pass such text in from the adapter (`bridgeTools({ asHelp })`).
 - Import an adapter only through its `index.ts`. Files inside an adapter folder do not import from other adapters.
 - Use `src/lib/` for errno checks, JSON files, logging and JSON lines. Do not hand-roll them in a module. Logs go to stderr only: stdout carries MCP and hook output.
 - Validate everything that crosses a process boundary with the schemas in `src/schema.ts`.
 - New agent kind: add it to `PEER_KINDS`, create `src/adapters/<kind>/` with an `index.ts` exporting the `Adapter`, register it in `ADAPTERS`, add e2e coverage. See `docs/adding-an-agent.md`. Never branch on kind outside `src/adapters/`.
-- Never ship an agy PreToolUse hook that returns `{}` for calls it does not mean to gate. agy treats `{}` as deny (`docs/agents/agy.md`, finding 5).
+- Never ship an Antigravity PreToolUse hook that returns `{}` for calls it does not mean to gate. Antigravity treats `{}` as deny (`docs/agents/antigravity.md`, finding 5).
 - After changing `src/`, run `pnpm build` and `agent-bridge install` so the live daemon restarts on the new code.
+- Naming: product names where people read (Claude Code, Antigravity, opencode). Kind ids where machines read (`claude`, `agy`, `opencode`): each kind id is the agent's CLI command. Antigravity's own skill and messages say `agy`, the command it runs.
 - Voice for user-facing text: short sentences, no em-dashes. Errors as `<what>. <why>. <do this>.`

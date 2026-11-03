@@ -1,6 +1,6 @@
 # opencode
 
-Tested on opencode 2.2.5 (v2 plugin API, beta), macOS. Code: `src/adapters/opencode/`.
+Command and kind id: `opencode`, so peers are named like `myapp-opencode`. Tested on opencode 2.2.5 (v2 plugin API, beta), macOS. Code: `src/adapters/opencode/`.
 
 ## Receiving
 

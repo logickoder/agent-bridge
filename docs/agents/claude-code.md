@@ -1,12 +1,12 @@
 # Claude Code
 
-Tested on Claude Code 2.1.316, macOS. Code: `src/adapters/claude/`.
+Command and kind id: `claude`, so peers are named like `myapp-claude`. Tested on Claude Code 2.1.316, macOS. Code: `src/adapters/claude/`.
 
 ## Receiving: pick one
 
 | Mode | How | How a message arrives |
 |---|---|---|
-| **Socket** (default) | `/bridge` (Claude may list it as `/agent-bridge:bridge`) | `join` registers the session's inbox socket, `CLAUDE_CODE_MESSAGING_SOCKET`. The daemon posts each message there; Claude shows it as a message from another session and an idle session wakes. `socket.ts` |
+| **Socket** (default) | `/bridge` (Claude may list it as `/agent-bridge:bridge`) | `join` registers the session's inbox socket, `CLAUDE_CODE_MESSAGING_SOCKET`. The daemon posts each message there; Claude shows it as a message from another session and an idle session wakes. The daemon saves the socket path and the socket file's inode and creation time, so a daemon restart keeps the session reachable. The path names the Claude process by pid, and pids get reused. A restart restores only a socket whose file id still matches, and a push checks it too. `socket.ts` |
 | **Monitor** | `/agent-bridge:bridge-monitor` | The plugin monitor, `agent-bridge monitor`, prints one line per message; Claude delivers each as a monitor event that wakes an idle session. `monitor.ts` |
 | **Channel** | launch with `agent-bridge claude [--as name]` | A channel push into the session. `channel/` |
 

@@ -3,10 +3,10 @@
 An adapter answers three questions for its agent.
 
 1. **Wake.** How does a message reach an idle session? Seen so far, in order of preference:
-   - push into the live session through a native interface: Claude's inbox socket, agy's `agentapi send-message`, opencode's `ctx.session.prompt` from a plugin;
+   - push into the live session through a native interface: Claude's inbox socket, Antigravity's `agentapi send-message`, opencode's `ctx.session.prompt` from a plugin;
    - an extension that runs in the session and listens: Claude's plugin monitor;
-   - a background command whose exit wakes the agent: agy's `listen`;
-   - a hook that injects messages at the next model call: agy's PreInvocation. It only fires when something else starts a turn.
+   - a background command whose exit wakes the agent: Antigravity's `listen`;
+   - a hook that injects messages at the next model call: Antigravity's PreInvocation. It only fires when something else starts a turn.
 2. **Identity.** Which session is which? An env var the agent sets for commands (`CLAUDE_CODE_SESSION_ID`, `ANTIGRAVITY_CONVERSATION_ID`), a hook field, or a plugin that passes it (opencode).
 3. **Knowledge.** How does the agent learn the protocol? A skill or tool when joining takes an action. Do not install anything that loads into sessions not on the bridge without the user asking.
 

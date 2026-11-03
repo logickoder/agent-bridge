@@ -26,14 +26,16 @@ A peer has a name, a kind (`claude`, `agy` or `opencode`) and, once it joins, a 
 ## Delivery
 
 - One message in flight per peer. It leaves the queue only on ack. A killed listener or a daemon restart loses nothing. Delivery is at least once.
-- **Push endpoints** (Claude's inbox socket, agy's agentapi) are acked when the push succeeds. A failed push keeps the message queued, drops the endpoint, and the fallbacks take over. `send` then says "Handed to X's direct delivery", not "Delivered live".
+- **Push endpoints** (Claude's inbox socket, Antigravity's agentapi) are acked when the push succeeds. A failed push keeps the message queued, drops the endpoint, and the fallbacks take over. `send` then says "Handed to X's direct delivery", not "Delivered live".
+- **Saved endpoints.** Claude's socket path is saved to `~/.agent-bridge/endpoints.json`, so a daemon restart keeps the session reachable. Antigravity's endpoint holds a CSRF token and stays in memory: after a restart its hook asks it to rejoin.
+- **Folders.** Each peer records the folder it joined from. `join` and `peers` list you first, then same-folder peers, marked "same folder". `send --to-kind <kind>` picks the one online peer of that kind in your folder. The MCP `send` tool and opencode's `bridge_send` take `to_kind` for the same.
 - **Listeners** reconnect after a daemon restart, a dropped socket or a slow start, with backoff up to 5s.
 - `send` lists who is online when the recipient is not.
 - One daemon at a time, enforced by a lock file. Clients start it on demand.
 
 ## Sender check
 
-A send from inside an agent session carries its session id, and the daemon accepts the sender name only if that session holds it. Other sends (a plain shell, agy's MCP tool) arrive marked `(unverified)`, and agents are told not to reply to them blindly.
+A send from inside an agent session carries its session id, and the daemon accepts the sender name only if that session holds it. Other sends (a plain shell, Antigravity's MCP tool) arrive marked `(unverified)`, and agents are told not to reply to them blindly.
 
 It stops mislabeled and casual spoofing, such as an agent told to "send as lead". It is not a security boundary: every session runs as your OS user, so any of your processes that finds another session's id can send as it. `status` shows a tag instead of raw session ids so they are not one copy away.
 
