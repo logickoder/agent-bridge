@@ -62,5 +62,7 @@ describe('opencode plugin', () => {
     const out = await send?.execute({ to: 'agy', text: 'hi' }, toolCtx)
     expect(out?.content).toMatch(/Delivered live/)
     expect(execs[1]).toEqual(['send', '--as', 'proj-opencode', 'agy', 'hi'])
+    await send?.execute({ to_kind: 'claude', text: 'hi' }, toolCtx)
+    expect(execs[2]).toEqual(['send', '--as', 'proj-opencode', '--to-kind', 'claude', 'hi'])
   })
 })

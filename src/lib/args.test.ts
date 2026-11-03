@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { takeFlag, takeSwitch } from './args.js'
+import { peerKind, takeFlag, takeSwitch } from './args.js'
 
 describe('takeSwitch', () => {
   it('removes a boolean flag and reports it, leaving the rest in order', () => {
@@ -16,5 +16,13 @@ describe('takeFlag', () => {
     const args = ['a', '--kind', 'agy', 'b']
     expect(takeFlag(args, '--kind')).toBe('agy')
     expect(args).toEqual(['a', 'b'])
+  })
+})
+
+describe('peerKind', () => {
+  it('parses a kind id, and names the kinds when it cannot', () => {
+    expect(peerKind('agy', '--to-kind')).toBe('agy')
+    expect(() => peerKind('codex', '--to-kind')).toThrow('--to-kind "codex" is not a kind. Kinds: claude, agy, opencode.')
+    expect(() => peerKind(undefined, '--to-kind')).toThrow('--to-kind is missing a kind.')
   })
 })

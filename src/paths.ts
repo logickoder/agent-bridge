@@ -9,6 +9,8 @@ export const QUEUE_DIR = path.join(HOME, 'queue')
 export const PEERS_FILE = path.join(HOME, 'peers.json')
 export const DAEMON_LOG = path.join(HOME, 'daemon.log')
 export const DAEMON_LOCK = path.join(HOME, 'daemon.lock')
+/** Push endpoints that hold no credential (Claude's inbox socket path), restored on daemon start. */
+export const ENDPOINTS_FILE = path.join(HOME, 'endpoints.json')
 
 /** The built CLI entry (dist/cli.js). Node resolves symlinks in module URLs, so this is the real path. */
 export const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'cli.js')

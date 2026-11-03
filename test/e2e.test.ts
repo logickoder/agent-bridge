@@ -80,8 +80,8 @@ interface Rpc {
   notes: Record<string, unknown>[]
 }
 
-function mcp(kind: 'claude' | 'agy', extra: Record<string, string> = {}): Rpc {
-  const p = spawn(process.execPath, [CLI, 'mcp', kind], { env: { ...env, ...extra } })
+function mcp(kind: 'claude' | 'agy', extra: Record<string, string> = {}, cwd?: string): Rpc {
+  const p = spawn(process.execPath, [CLI, 'mcp', kind], { env: { ...env, ...extra }, ...(cwd ? { cwd } : {}) })
   procs.push(p)
   let next = 1
   const pending = new Map<number, (m: Record<string, unknown>) => void>()
@@ -463,6 +463,36 @@ describe('online names', () => {
     expect(run(['join', '--kind', 'agy', '--take', 'role-x'], second)).toMatch(/Joined agent-bridge as "role-x"/)
     expect(await l.exited()).toBe(0)
     expect(l.out()).toMatch(/took over/)
+  })
+})
+
+describe('send by kind', () => {
+  it('reaches the one online peer of a kind in this folder, and refuses when there is none or several', async () => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ab-folder-')))
+    const inDir = (args: string[], extra: Record<string, string>) =>
+      execFileSync(process.execPath, [CLI, ...args], { env: { ...env, ...extra }, encoding: 'utf8', cwd: dir })
+    expect(() => inDir(['send', '--to-kind', 'opencode', 'anyone?'], {})).toThrow(/no online opencode peer in this folder/)
+    inDir(['join', '--kind', 'opencode', 'near-oc'], { OPENCODE_SESSION_ID: 'kind-1' })
+    const st = start(['opencode-stream'], { OPENCODE_SESSION_ID: 'kind-1' })
+    await online('near-oc')
+    expect(inDir(['send', '--to-kind', 'opencode', 'hello by kind'], {})).toMatch(/near-oc/)
+    await until(() => st.out().includes('hello by kind'), 'message by kind')
+    // The MCP send tool resolves by kind from the folder its server runs in.
+    const agy = mcp('agy', {}, dir)
+    await init(agy)
+    const viaMcp = await agy.call('tools/call', { name: 'send', arguments: { to_kind: 'opencode', text: 'mcp by kind', as: 'mcp-k' } })
+    expect(toolText(viaMcp)).toMatch(/near-oc/)
+    await until(() => st.out().includes('mcp by kind'), 'mcp message by kind')
+    const neither = await agy.call('tools/call', { name: 'send', arguments: { text: 'x', as: 'mcp-k' } })
+    expect(neither['result']).toMatchObject({ isError: true })
+    agy.p.kill()
+    inDir(['join', '--kind', 'opencode', 'near-oc-2'], { OPENCODE_SESSION_ID: 'kind-2' })
+    const st2 = start(['opencode-stream'], { OPENCODE_SESSION_ID: 'kind-2' })
+    await online('near-oc-2')
+    expect(() => inDir(['send', '--to-kind', 'opencode', 'which one?'], {})).toThrow(/2 online opencode peers in this folder[\s\S]*near-oc/)
+    st.p.stdin.end()
+    st2.p.stdin.end()
+    fs.rmSync(dir, { recursive: true, force: true })
   })
 })
 

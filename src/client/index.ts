@@ -83,13 +83,19 @@ export async function stopDaemon(): Promise<void> {
  * Binds the session's name in the daemon and returns it: the chosen name (renaming the session's current
  * one if it has one), or the auto name. Without a session, a chosen name is returned unbound.
  */
-export async function resolveName(identity: Identity, kind: PeerKind, session: string | undefined, opts: { take?: boolean } = {}): Promise<string> {
+export async function resolveName(
+  identity: Identity,
+  kind: PeerKind,
+  session: string | undefined,
+  opts: { take?: boolean; folder?: string } = {},
+): Promise<string> {
   if (!session) {
     if ('name' in identity) return identity.name
     throw new Error('no session id. An auto name needs one. Run this from inside the agent, or pass a name.')
   }
-  const target = 'name' in identity ? { name: identity.name, ...(opts.take ? { take: true } : {}) } : { folder: identity.folder }
-  return (await request({ op: 'claim', ...target, kind, session }, 'claimed')).name
+  const folder = 'name' in identity ? opts.folder : identity.folder
+  const target = 'name' in identity ? { name: identity.name, ...(opts.take ? { take: true } : {}) } : {}
+  return (await request({ op: 'claim', ...target, ...(folder ? { folder } : {}), kind, session }, 'claimed')).name
 }
 
 /** One request, one reply. Rejects on an `error` reply. */

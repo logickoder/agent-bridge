@@ -104,3 +104,13 @@ describe('replyOr against a spoofed bridge sender', () => {
     expect(replyOr({ from: 'agent-bridge' }, 'reply!')).toBe('reply!')
   })
 })
+
+describe('formatPeers with folders', () => {
+  it('lists online peers in the same folder first and marks them', async () => {
+    const { formatPeers } = await import('./format.js')
+    const p = (name: string, kind: string, folder?: string) => ({ name, kind, online: true, queued: 0, ...(folder ? { folder } : {}) })
+    expect(formatPeers([p('far', 'agy', '/p/other'), p('near', 'claude', '/p/app'), p('me', 'agy', '/p/app')], { self: 'me', folder: '/p/app' })).toBe(
+      'Online: me (agy, you, same folder), near (claude, same folder), far (agy).',
+    )
+  })
+})

@@ -33,7 +33,12 @@ export const Peer = z.object({
   auto: z.boolean().optional(),
   /** The session that held it before `leave`, so a rejoin gets the same name. */
   lastSession: z.string().optional(),
+  /** The folder the session joined from, so peers in the same project can find each other. */
+  folder: z.string().optional(),
 })
+
+/** A push endpoint saved to disk so it survives a daemon restart. Only endpoints with no credential are saved. */
+export const SavedEndpoint = z.object({ session: z.string().min(1), kind: PeerKind, endpoint: z.record(z.string(), z.string()) })
 
 export const Request = z.discriminatedUnion('op', [
   z.object({
@@ -45,8 +50,9 @@ export const Request = z.discriminatedUnion('op', [
     stream: z.boolean(),
   }).refine(r => r.as !== undefined || r.session !== undefined, 'listen needs `as` or `session`.'),
   /**
-   * Bind a name to a session. With `folder`: the session's auto name, `<folder>-<kind>` or the lowest free
-   * `-<n>`. With `name`: that name, taking it over unless it is another session's auto name.
+   * Bind a name to a session. With `name`: that name, taking it over unless it is another session's auto name.
+   * Without: the session's auto name, `<folder>-<kind>` or the lowest free `-<n>`. `folder` is the folder the
+   * session joins from, recorded on the peer.
    */
   z.object({
     op: z.literal('claim'),
@@ -56,18 +62,37 @@ export const Request = z.discriminatedUnion('op', [
     session: z.string().min(1),
     /** Take `name` even if another session is online with it. Without it, an online name is refused. */
     take: z.boolean().optional(),
-  }).refine(r => (r.folder === undefined) !== (r.name === undefined), 'claim needs exactly one of `folder` or `name`.'),
-  /** `sessions`: the sender's agent session ids. With them, `from` must be a name one of them holds. */
-  z.object({ op: z.literal('send'), from: PeerName, to: PeerName, text: z.string().trim().min(1), sessions: z.array(z.string().min(1)).optional() }),
+  }).refine(r => r.name !== undefined || r.folder !== undefined, 'claim needs a `name` or a `folder`.'),
+  /**
+   * `sessions`: the sender's agent session ids. With them, `from` must be a name one of them holds.
+   * `toKind` instead of `to`: the one online peer of that kind that joined from `folder`.
+   */
+  z.object({
+    op: z.literal('send'),
+    from: PeerName,
+    to: PeerName.optional(),
+    toKind: PeerKind.optional(),
+    folder: z.string().min(1).optional(),
+    text: z.string().trim().min(1),
+    sessions: z.array(z.string().min(1)).optional(),
+  })
+    .refine(r => (r.to === undefined) !== (r.toKind === undefined), 'send needs exactly one of `to` or `toKind`.')
+    .refine(r => r.toKind === undefined || r.folder !== undefined, 'send with `toKind` needs a `folder`.'),
   z.object({ op: z.literal('ack'), as: PeerName, id: z.string() }),
   z.object({ op: z.literal('drain'), session: z.string().min(1) }),
   z.object({ op: z.literal('ack-drained'), session: z.string().min(1), ids: z.array(z.string()) }),
   z.object({ op: z.literal('leave'), as: PeerName }),
   /**
    * Register a way to push messages into the session itself, e.g. agy's `agentapi send-message`. The endpoint
-   * is adapter-defined and may hold a credential, so the daemon keeps it in memory only and never shows it.
+   * is adapter-defined and may hold a credential, so the daemon never shows it. It keeps it in memory only,
+   * unless the adapter defines `alive` (credential-free endpoints): then it is saved to restore after a restart.
    */
-  z.object({ op: z.literal('push'), kind: PeerKind, session: z.string().min(1), endpoint: z.record(z.string(), z.string()) }),
+  z.object({
+    op: z.literal('push'),
+    kind: PeerKind,
+    session: z.string().min(1),
+    endpoint: z.record(z.string(), z.string()),
+  }),
   z.object({ op: z.literal('status') }),
   z.object({ op: z.literal('shutdown') }),
 ])
@@ -82,7 +107,7 @@ export const Reply = z.discriminatedUnion('type', [
   z.object({ type: z.literal('claimed'), name: PeerName }),
   /** `listening`: other peers online now, filled when the recipient is not, so the sender can redirect. */
   /** `pushed`: handed to a push endpoint; it arrives unless that delivery fails, then it waits in the queue. */
-  z.object({ type: z.literal('sent'), id: z.string(), live: z.boolean(), pushed: z.boolean().default(false), queued: z.number(), listening: z.array(PeerName).default([]) }),
+  z.object({ type: z.literal('sent'), to: PeerName.optional(), id: z.string(), live: z.boolean(), pushed: z.boolean().default(false), queued: z.number(), listening: z.array(PeerName).default([]) }),
   /** `rejoin`: the session is bound but has no push endpoint (lost on a daemon restart). Set once per daemon run. */
   z.object({ type: z.literal('drained'), msgs: z.array(Message), rejoin: z.boolean().default(false) }),
   z.object({ type: z.literal('status'), pid: z.number(), peers: z.array(PeerStatus) }),
@@ -92,6 +117,7 @@ export const Reply = z.discriminatedUnion('type', [
 export type PeerKind = z.infer<typeof PeerKind>
 export type Message = z.infer<typeof Message>
 export type Peer = z.infer<typeof Peer>
+export type SavedEndpoint = z.infer<typeof SavedEndpoint>
 export type PeerStatus = z.infer<typeof PeerStatus>
 export type Request = z.infer<typeof Request>
 export type Reply = z.infer<typeof Reply>

@@ -29,7 +29,7 @@ export async function serveClaudeMcp(identity: Identity | undefined, env: NodeJS
   let unnamed = SEND_ONLY
   if (identity) {
     try {
-      self = await resolveName(identity, 'claude', session)
+      self = await resolveName(identity, 'claude', session, { folder: process.cwd() })
     } catch (err) {
       unnamed = `agent-bridge could not get a peer name for this session: ${toError(err).message} This session can send but not receive. Relaunch with \`agent-bridge claude\` once the daemon works.`
       log(unnamed)

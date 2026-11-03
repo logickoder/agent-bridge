@@ -1,6 +1,6 @@
 import { BRIDGE_SENDER } from '../format.js'
 import { autoBase, inFamily, nextFree, sessionTag } from '../names.js'
-import type { Message, Peer, PeerKind, PeerStatus, Reply, Request } from '../schema.js'
+import type { Message, Peer, PeerKind, PeerStatus, Reply, Request, SavedEndpoint } from '../schema.js'
 
 /** A peer with nothing queued and no activity for this long is dropped, freeing its name. */
 const PRUNE_AFTER_MS = 24 * 3600_000
@@ -23,7 +23,8 @@ export interface Conn {
 }
 
 export interface Store {
-  load(): { peers: Peer[]; queues: Map<string, Message[]> }
+  load(): { peers: Peer[]; queues: Map<string, Message[]>; endpoints: SavedEndpoint[] }
+  saveEndpoints(endpoints: SavedEndpoint[]): void
   savePeers(peers: Peer[]): void
   saveQueue(name: string, msgs: Message[]): void
   dropQueue(name: string): void
@@ -37,6 +38,11 @@ export interface HubDeps {
   log?: (msg: string) => void
   /** Pushes one message through an adapter's endpoint. Resolves once delivered. */
   deliver?: (kind: PeerKind, endpoint: Record<string, string>, msg: Message) => Promise<void>
+  /**
+   * The kind's check that an endpoint still reaches its session, or undefined. A kind with one holds no
+   * credential in its endpoints, so they are saved, and checked before they are restored after a restart.
+   */
+  probe?: (kind: PeerKind) => ((endpoint: Record<string, string>) => Promise<boolean>) | undefined
 }
 
 /** Status as clients see it: session ids become tags, and the previous session is dropped. */
@@ -55,10 +61,12 @@ class PushConn implements Conn {
   constructor(
     private readonly hub: Hub,
     private readonly deliver: NonNullable<HubDeps['deliver']>,
-    private readonly kind: PeerKind,
+    readonly kind: PeerKind,
     private readonly now: () => Date,
     readonly session: string,
     readonly endpoint: Record<string, string>,
+    /** Saved to disk, so it is restored after a daemon restart. */
+    readonly saved: boolean,
     private readonly onDrop: (conn: PushConn, why: string) => void,
   ) {}
 
@@ -120,20 +128,25 @@ export class Hub {
   private readonly byConn = new Map<Conn, Waiter>()
   /** Listeners that asked by session before the session held a name. Attached on claim. */
   private readonly pending = new Map<Conn, ListenRequest>()
-  /** One push endpoint per session, in memory only. */
+  /** One push endpoint per session. */
   private readonly pushers = new Map<string, PushConn>()
   /** Sessions already asked to rejoin this daemon run, so the hint is not repeated every turn. */
   private readonly rejoinAsked = new Set<string>()
+  /** Inside a claim: savePeers only marks dirty, and the claim writes once at the end. */
+  private deferSave = false
+  private dirty = false
   /** lastSeen as last written to disk, per peer. Throttles touch() against what is stored, not in memory. */
   private readonly savedSeen = new Map<string, number>()
 
   constructor(private readonly deps: HubDeps) {
-    const { peers, queues } = deps.store.load()
+    const { peers, queues, endpoints } = deps.store.load()
     for (const p of peers) {
       this.peers.set(p.name, p)
       this.savedSeen.set(p.name, this.seenAt(p))
     }
     for (const [name, msgs] of queues) this.queues.set(name, msgs)
+    // Restore saved endpoints, so a session that joined before a restart still receives without rejoining.
+    if (endpoints.length) void this.restore(endpoints)
     // No prune here: listeners have not reconnected yet, so every peer looks idle.
   }
 
@@ -160,7 +173,7 @@ export class Hub {
       case 'push':
         if (!this.deps.deliver) return this.fail(conn, 'this daemon cannot push. Run `agent-bridge restart`.')
       {
-        const refused = this.push(req.kind, req.session, req.endpoint, this.deps.deliver)
+        const refused = this.push(req.kind, req.session, req.endpoint, this.deps.deliver, true)
         return refused ? this.fail(conn, refused) : this.reply(conn, { type: 'ok' })
       }
       case 'leave':
@@ -224,16 +237,18 @@ export class Hub {
   }
 
   /** Registers a push endpoint. Returns why it was refused, if it was. */
-  private push(kind: PeerKind, session: string, endpoint: Record<string, string>, deliver: NonNullable<HubDeps['deliver']>): string | undefined {
+  private push(kind: PeerKind, session: string, endpoint: Record<string, string>, deliver: NonNullable<HubDeps['deliver']>, write: boolean): string | undefined {
     const old = this.pushers.get(session)
-    if (old) this.dropPusher(old)
+    if (old) this.dropPusher(old, false)
+    const saved = this.deps.probe?.(kind) !== undefined
     let refused: string | undefined
-    const conn = new PushConn(this, deliver, kind, this.deps.now, session, endpoint, (c, why) => {
+    const conn = new PushConn(this, deliver, kind, this.deps.now, session, endpoint, saved, (c, why) => {
       refused ??= why
       this.deps.log?.(`push endpoint for session ${sessionTag(session)} dropped: ${why}`)
       this.dropPusher(c)
     })
     this.pushers.set(session, conn)
+    if (write && (saved || old?.saved)) this.saveEndpoints()
     this.listen({ op: 'listen', kind, session, stream: true }, conn)
     // listen answers synchronously when it refuses (another stream listener, a name clash).
     return conn.closed ? refused : undefined
@@ -246,11 +261,43 @@ export class Hub {
     return true
   }
 
-  private dropPusher(conn: PushConn): void {
+  /**
+   * Restores saved endpoints whose session is still there, so it receives without rejoining. Each is checked
+   * before it is attached: a closed session's socket path can be reused by another session.
+   */
+  private async restore(endpoints: SavedEndpoint[]): Promise<void> {
+    const deliver = this.deps.deliver
+    const checks = await Promise.all(
+      endpoints.map(async e => {
+        const probe = this.deps.probe?.(e.kind)
+        // A session that holds no name any more has nothing to receive for.
+        const held = this.nameOf(e.session, e.kind) !== undefined
+        return { e, ok: deliver !== undefined && probe !== undefined && held && (await probe(e.endpoint).catch(() => false)) }
+      }),
+    )
+    for (const { e, ok } of checks) {
+      // A session that rejoined during the check registered a fresh endpoint: keep that one.
+      if (!ok || !deliver || this.pushers.has(e.session)) continue
+      this.push(e.kind, e.session, e.endpoint, deliver, false)
+    }
+    const gone = checks.filter(c => !c.ok)
+    for (const { e } of gone) this.deps.log?.(`saved endpoint for session ${sessionTag(e.session)} is gone: dropped.`)
+    if (gone.length) this.saveEndpoints()
+  }
+
+  /** Writes the saved endpoints: every live one whose kind holds no credential. */
+  private saveEndpoints(): void {
+    const endpoints = [...this.pushers.values()].filter(c => c.saved).map(c => ({ session: c.session, kind: c.kind, endpoint: c.endpoint }))
+    this.deps.store.saveEndpoints(endpoints)
+  }
+
+  private dropPusher(conn: PushConn, write = true): void {
     if (conn.closed) return
     conn.closed = true
     if (this.pushers.get(conn.session) === conn) {
       this.pushers.delete(conn.session)
+      // A failed endpoint is gone (the session exited): do not restore it on the next start.
+      if (write && conn.saved) this.saveEndpoints()
       // A lost endpoint earns a fresh rejoin hint, even if one was used earlier this run.
       this.rejoinAsked.delete(conn.session)
     }
@@ -270,7 +317,23 @@ export class Hub {
   }
 
   private claim(req: ClaimRequest): { name: string } | { error: string } {
-    if (req.name !== undefined) return this.claimNamed(req.name, req.kind, req.session, req.take === true)
+    // One peers.json write per claim: the claim paths and the folder each mark it dirty.
+    this.deferSave = true
+    try {
+      const r = req.name !== undefined ? this.claimNamed(req.name, req.kind, req.session, req.take === true) : this.claimAutoResult(req)
+      const peer = 'name' in r ? this.peers.get(r.name) : undefined
+      if (peer && req.folder && peer.folder !== req.folder) {
+        peer.folder = req.folder
+        this.dirty = true
+      }
+      return r
+    } finally {
+      this.deferSave = false
+      if (this.dirty) this.savePeers()
+    }
+  }
+
+  private claimAutoResult(req: ClaimRequest): { name: string } | { error: string } {
     const folder = req.folder ?? ''
     const name = this.claimAuto(folder, req.kind, req.session)
     if (name) return { name }
@@ -380,10 +443,12 @@ export class Hub {
 
   private send(req: SendRequest, conn: Conn): void {
     if (req.from === BRIDGE_SENDER) return this.fail(conn, RESERVED)
-    const peer = this.peers.get(req.to)
+    const to = req.toKind ? this.nearest(req.toKind, req.folder ?? '', req.from) : { name: req.to ?? '' }
+    if ('error' in to) return this.fail(conn, to.error)
+    const peer = this.peers.get(to.name)
     if (!peer) {
       const known = [...this.peers.keys()].join(', ') || 'none yet'
-      return this.fail(conn, `unknown peer "${req.to}". Known peers: ${known}. A peer is known once it joins the bridge.`)
+      return this.fail(conn, `unknown peer "${to.name}". Known peers: ${known}. A peer is known once it joins the bridge.`)
     }
     // A sender inside an agent session must use a name that session holds. Without a session, it is unverified.
     const holder = this.peers.get(req.from)
@@ -403,7 +468,18 @@ export class Hub {
     const pushed = sentNow && head.waiter.conn.async === true
     const live = sentNow && !pushed
     const listening = this.liveWaiters(peer).length ? [] : this.othersListening([peer.name, req.from])
-    this.reply(conn, { type: 'sent', id: msg.id, live, pushed, queued: q.length, listening })
+    this.reply(conn, { type: 'sent', to: peer.name, id: msg.id, live, pushed, queued: q.length, listening })
+  }
+
+  /** The one online peer of `kind`, other than the sender, that joined from `folder`. None or several: why. */
+  private nearest(kind: PeerKind, folder: string, from: string): { name: string } | { error: string } {
+    const online = [...this.peers.values()].filter(p => p.kind === kind && p.name !== from && this.liveWaiters(p).length > 0)
+    const near = online.filter(p => p.folder === folder).map(p => p.name)
+    const [only, ...more] = near
+    if (only && !more.length) return { name: only }
+    if (only) return { error: `${near.length} online ${kind} peers in this folder: ${near.join(', ')}. Send to one by name.` }
+    const elsewhere = online.length ? ` Online elsewhere: ${online.map(p => p.name).join(', ')}.` : ''
+    return { error: `no online ${kind} peer in this folder.${elsewhere} Send by name, or join one here.` }
   }
 
   private ack(as: string, id: string): void {
@@ -554,6 +630,11 @@ export class Hub {
   }
 
   private savePeers(): void {
+    if (this.deferSave) {
+      this.dirty = true
+      return
+    }
+    this.dirty = false
     for (const p of this.peers.values()) this.savedSeen.set(p.name, this.seenAt(p))
     this.deps.store.savePeers([...this.peers.values()])
   }

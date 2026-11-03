@@ -16,7 +16,7 @@ import { SESSION_ENV } from './names.js'
 
 export const agy: Adapter = {
   kind: 'agy',
-  joinHint: 'agy: type `/bridge [name]`.',
+  joinHint: 'Antigravity: type `/bridge [name]`.',
   sessionEnv: SESSION_ENV,
   joined: async (name, pushed) => (await import('./format.js')).joinedText(name, pushed),
   pushEndpoint: async env => (await import('./push.js')).endpointFromEnv(env),

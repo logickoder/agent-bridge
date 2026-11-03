@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { request } from '../client/index.js'
 import { formatPeers, formatSent } from '../format.js'
 import { defineTool, type Tool } from './server.js'
-import { PeerName } from '../schema.js'
+import { PeerKind, PeerName } from '../schema.js'
 
 /** A server either speaks for one fixed peer (`self`) or takes the sender's name on every call (`as`). */
 export type ToolContext = ({ self: string } | { asHelp: string }) & {
@@ -19,7 +19,10 @@ export function bridgeTools(ctx: ToolContext): Tool[] {
       ? `Send a message to another peer on agent-bridge. You are "${self}". It arrives live if the peer is listening, otherwise it waits in a queue. Use the peers tool to see names.`
       : `Send a message to another peer on agent-bridge. Pass \`as\`: ${asHelp}. It arrives live if the peer is listening, otherwise it waits in a queue.`,
     args: z.object({
-      to: PeerName.describe('Peer to send to. The peers tool lists names.'),
+      to: PeerName.optional().describe('Peer to send to. The peers tool lists names. Pass this or to_kind.'),
+      to_kind: PeerKind.optional().describe(
+        'Instead of to: the agent kind to send to. Picks the one online peer of that kind that joined from this folder, and fails if there are none or several.',
+      ),
       text: z.string().trim().min(1, 'Message is empty.').describe('The message. Plain text or markdown.'),
       as: PeerName.optional().describe(
         self ? `Ignored. This session is always "${self}".` : `Your own peer name: ${asHelp}. Required.`,
@@ -28,8 +31,11 @@ export function bridgeTools(ctx: ToolContext): Tool[] {
     run: async args => {
       const from = self ?? args.as
       if (!from) throw new Error(`"as" is missing. This server does not know who you are. Pass ${asHelp}.`)
-      const r = await request({ op: 'send', from, to: args.to, text: args.text, ...(ctx.sessions?.length ? { sessions: ctx.sessions } : {}) }, 'sent')
-      return formatSent(args.to, r)
+      if ((args.to === undefined) === (args.to_kind === undefined)) throw new Error('pass one of "to" or "to_kind". Name a peer, or a kind to reach the one in this folder.')
+      // The server runs in the agent's working folder, the same folder join records.
+      const target = args.to !== undefined ? { to: args.to } : { toKind: args.to_kind, folder: process.cwd() }
+      const r = await request({ op: 'send', from, ...target, text: args.text, ...(ctx.sessions?.length ? { sessions: ctx.sessions } : {}) }, 'sent')
+      return formatSent(r.to ?? args.to ?? '', r)
     },
   })
 

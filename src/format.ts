@@ -65,16 +65,23 @@ interface PeerLine {
   kind: string
   online: boolean
   queued: number
+  folder?: string | undefined
 }
 
 /**
  * Peers for people and agents: online ones by name, offline ones only as a count, since an offline peer cannot
  * answer. `all` lists everyone with state and queue, for stats.
  */
-export function formatPeers(peers: PeerLine[], opts: { all?: boolean; self?: string }): string {
+export function formatPeers(peers: PeerLine[], opts: { all?: boolean; self?: string; folder?: string }): string {
   if (!peers.length) return 'No peers yet. Peers appear here once they join the bridge.'
   if (opts.all) return peers.map(p => `${p.name} (${p.kind}) ${p.online ? 'online' : 'offline'}, ${p.queued} queued`).join('\n')
-  const online = peers.filter(p => p.online).map(p => `${p.name} (${p.kind}${p.name === opts.self ? ', you' : ''})`)
+  // You first, then peers in the caller's folder: in practice, the other agents working on the same project.
+  const near = (p: PeerLine): boolean => opts.folder !== undefined && p.folder === opts.folder
+  const online = peers
+    .filter(p => p.online)
+    .map(p => ({ p, you: p.name === opts.self, here: near(p) }))
+    .sort((a, b) => Number(b.you) - Number(a.you) || Number(b.here) - Number(a.here))
+    .map(({ p, you, here }) => `${p.name} (${[p.kind, you ? 'you' : '', here ? 'same folder' : ''].filter(Boolean).join(', ')})`)
   const offline = peers.length - online.length
   const head = online.length ? `Online: ${online.join(', ')}.` : 'Nobody is online.'
   return offline ? `${head} ${offline} offline: \`agent-bridge peers --all\` lists them.` : head

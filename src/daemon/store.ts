@@ -4,8 +4,8 @@ import { z } from 'zod'
 import type { Store } from './hub.js'
 import { readJson, writeJson } from '../lib/json-file.js'
 import { logger } from '../lib/log.js'
-import { ensureHome, PEERS_FILE, QUEUE_DIR } from '../paths.js'
-import { Message, Peer, PeerName } from '../schema.js'
+import { ENDPOINTS_FILE, ensureHome, PEERS_FILE, QUEUE_DIR } from '../paths.js'
+import { Message, Peer, PeerName, SavedEndpoint } from '../schema.js'
 
 const log = logger('store')
 
@@ -34,10 +34,12 @@ export function fileStore(): Store {
         if (!f.endsWith('.json') || !PeerName.safeParse(name).success) continue
         queues.set(name, readOrSetAside(path.join(QUEUE_DIR, f), z.array(Message)) ?? [])
       }
-      return { peers, queues }
+      const endpoints = readOrSetAside(ENDPOINTS_FILE, z.array(SavedEndpoint)) ?? []
+      return { peers, queues, endpoints }
     },
     savePeers: peers => writeJson(PEERS_FILE, peers),
     saveQueue: (name, msgs) => writeJson(path.join(QUEUE_DIR, `${name}.json`), msgs),
+    saveEndpoints: endpoints => writeJson(ENDPOINTS_FILE, endpoints),
     dropQueue: name => fs.rmSync(path.join(QUEUE_DIR, `${name}.json`), { force: true }),
   }
 }

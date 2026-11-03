@@ -114,16 +114,23 @@ export function createPlugin(deps: { exec: Exec; spawn: Spawn }) {
         })
         editor.add({
           name: 'bridge_send',
-          description: 'Send a message to another peer on agent-bridge. Use bridge_join first. Run `agent-bridge status` to see peer names.',
+          description:
+            'Send a message to another peer on agent-bridge. Use bridge_join first. Run `agent-bridge status` to see peer names. Pass to, or to_kind to reach the one online peer of that kind in this folder.',
           input: {
             type: 'object',
-            properties: { to: { type: 'string', description: 'Peer name' }, text: { type: 'string', description: 'The message' } },
-            required: ['to', 'text'],
+            properties: {
+              to: { type: 'string', description: 'Peer name' },
+              to_kind: { type: 'string', description: 'Instead of to: an agent kind (claude, agy, opencode)' },
+              text: { type: 'string', description: 'The message' },
+            },
+            required: ['text'],
             additionalProperties: false,
           },
           execute: async (input, context) => {
             const name = requireName(context.sessionID)
-            const out = await deps.exec(['send', '--as', name, String(input['to']), String(input['text'])], envFor(context.sessionID), cwd)
+            if ((input['to'] === undefined) === (input['to_kind'] === undefined)) throw new Error('pass one of "to" or "to_kind". Name a peer, or a kind to reach the one in this folder.')
+            const target = input['to_kind'] !== undefined ? ['--to-kind', String(input['to_kind'])] : [String(input['to'])]
+            const out = await deps.exec(['send', '--as', name, ...target, String(input['text'])], envFor(context.sessionID), cwd)
             return { content: out }
           },
         })

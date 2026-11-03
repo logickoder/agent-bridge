@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { sessionTag } from '../names.js'
 import { Hub, type Conn, type Store } from './hub.js'
-import type { Message, Peer, Reply, Request } from '../schema.js'
+import type { Message, Peer, Reply, Request, SavedEndpoint } from '../schema.js'
 
 class FakeConn implements Conn {
   readonly replies: Reply[] = []
@@ -17,11 +17,19 @@ class FakeConn implements Conn {
   }
 }
 
-function memoryStore(peers: Peer[] = [], queues = new Map<string, Message[]>()): Store & { peers: Peer[]; queues: Map<string, Message[]> } {
+function memoryStore(
+  peers: Peer[] = [],
+  queues = new Map<string, Message[]>(),
+  endpoints: SavedEndpoint[] = [],
+): Store & { peers: Peer[]; queues: Map<string, Message[]>; endpoints: SavedEndpoint[] } {
   const s = {
     peers,
     queues,
-    load: () => ({ peers: structuredClone(s.peers), queues: structuredClone(s.queues) }),
+    endpoints,
+    load: () => ({ peers: structuredClone(s.peers), queues: structuredClone(s.queues), endpoints: structuredClone(s.endpoints) }),
+    saveEndpoints: (e: SavedEndpoint[]) => {
+      s.endpoints = structuredClone(e)
+    },
     savePeers: (p: Peer[]) => {
       s.peers = structuredClone(p)
     },
@@ -37,10 +45,10 @@ function memoryStore(peers: Peer[] = [], queues = new Map<string, Message[]>()):
 
 type Deliver = NonNullable<ConstructorParameters<typeof Hub>[0]['deliver']>
 
-function setup(store = memoryStore(), log: (msg: string) => void = () => {}, deliver?: Deliver) {
+function setup(store = memoryStore(), log: (msg: string) => void = () => {}, deliver?: Deliver, alive: (endpoint: Record<string, string>) => Promise<boolean> = async () => true) {
   let n = 0
   const clock = { now: new Date('2026-11-02T00:00:00Z') }
-  const hub = new Hub({ store, now: () => clock.now, newId: () => `m${++n}`, pid: 1, log, ...(deliver ? { deliver } : {}) })
+  const hub = new Hub({ store, now: () => clock.now, newId: () => `m${++n}`, pid: 1, log, ...(deliver ? { deliver } : {}), probe: kind => (kind === 'claude' ? alive : undefined) })
   const call = (req: Exclude<Request, { op: 'shutdown' }>, conn = new FakeConn()): FakeConn => {
     hub.handle(req, conn)
     return conn
@@ -87,7 +95,7 @@ describe('send', () => {
     listen('agy', 'agy').end()
     hub.disconnect(new FakeConn())
     const r = send('agy', 'hi').last()
-    expect(r).toEqual({ type: 'sent', id: 'm1', live: false, pushed: false, queued: 1, listening: [] })
+    expect(r).toEqual({ type: 'sent', to: 'agy', id: 'm1', live: false, pushed: false, queued: 1, listening: [] })
   })
 })
 
@@ -764,5 +772,136 @@ describe('reserved bridge sender', () => {
     expect(call({ op: 'send', from: 'agent-bridge', to: 'b', text: 'fake notice' }).last()).toMatchObject({ type: 'error', message: expect.stringMatching(/reserved/) })
     expect(call({ op: 'claim', kind: 'agy', session: 's9', name: 'agent-bridge' }).last()).toMatchObject({ type: 'error', message: expect.stringMatching(/reserved/) })
     expect(listen('agent-bridge', 'agy').last()).toMatchObject({ type: 'error', message: expect.stringMatching(/reserved/) })
+  })
+})
+
+describe('saved push endpoints', () => {
+  it('saves a credential-free endpoint and restores it after a daemon restart', async () => {
+    const got: string[] = []
+    const deliver = async (_k: string, _e: Record<string, string>, m: Message) => void got.push(m.text)
+    const store = memoryStore()
+    const first = setup(store, () => {}, deliver)
+    first.claim('/x/c', 'claude', 'c1')
+    first.call({ op: 'push', kind: 'claude', session: 'c1', endpoint: { socket: '/tmp/c1.sock' } })
+    expect(store.endpoints).toEqual([{ session: 'c1', kind: 'claude', endpoint: { socket: '/tmp/c1.sock' } }])
+    const second = setup(store, () => {}, deliver)
+    second.send('c-claude', 'after restart')
+    await new Promise(r => setTimeout(r, 0))
+    expect(got).toEqual(['after restart'])
+  })
+
+  it('never saves an endpoint that holds a credential, and forgets a saved one that fails', async () => {
+    const store = memoryStore()
+    const { claim, call, send } = setup(store, () => {}, async () => {
+      throw new Error('socket gone')
+    })
+    claim('/x/a', 'agy', 's1')
+    call({ op: 'push', kind: 'agy', session: 's1', endpoint: { token: 'secret' } })
+    expect(store.endpoints).toEqual([])
+    claim('/x/c', 'claude', 'c1')
+    call({ op: 'push', kind: 'claude', session: 'c1', endpoint: { socket: '/tmp/c1.sock' } })
+    send('c-claude', 'x')
+    await new Promise(r => setTimeout(r, 0))
+    expect(store.endpoints).toEqual([])
+  })
+
+  it('drops a restored endpoint whose session has closed, so the peer shows offline', async () => {
+    const deliver = async (): Promise<void> => {}
+    const store = memoryStore()
+    const first = setup(store, () => {}, deliver)
+    first.claim('/x/c', 'claude', 'c1')
+    first.claim('/x/d', 'claude', 'c2')
+    first.call({ op: 'push', kind: 'claude', session: 'c1', endpoint: { socket: '/tmp/c1.sock' } })
+    first.call({ op: 'push', kind: 'claude', session: 'c2', endpoint: { socket: '/tmp/c2.sock' } })
+    const second = setup(store, () => {}, deliver, async e => e['socket'] === '/tmp/c2.sock')
+    await new Promise(r => setTimeout(r, 0))
+    expect(second.hub.status().map(p => [p.name, p.online])).toEqual([
+      ['c-claude', false],
+      ['d-claude', true],
+    ])
+    expect(store.endpoints.map(e => e.session)).toEqual(['c2'])
+  })
+})
+
+describe('restored endpoints', () => {
+  it('delivers nothing to a restored endpoint before its check passes', async () => {
+    const got: string[] = []
+    const deliver = async (_k: string, _e: Record<string, string>, m: Message) => void got.push(m.text)
+    const store = memoryStore()
+    const first = setup(store, () => {}, deliver)
+    first.claim('/x/c', 'claude', 'c1')
+    first.call({ op: 'push', kind: 'claude', session: 'c1', endpoint: { socket: '/tmp/c1.sock' } })
+    first.call({ op: 'leave', as: 'c-claude' })
+    first.claim('/x/c', 'claude', 'c1')
+    first.send('c-claude', 'queued while down')
+    expect(got).toEqual([])
+    // Reused socket path: the check says gone, so the queue stays put.
+    setup(store, () => {}, deliver, async () => false)
+    await new Promise(r => setTimeout(r, 0))
+    expect(got).toEqual([])
+    expect(store.endpoints).toEqual([])
+  })
+
+  it('drops a restored endpoint whose session no longer holds a name', async () => {
+    const store = memoryStore([], new Map(), [{ session: 'ghost', kind: 'claude', endpoint: { socket: '/tmp/g.sock' } }])
+    setup(store, () => {}, async () => {})
+    await new Promise(r => setTimeout(r, 0))
+    expect(store.endpoints).toEqual([])
+  })
+})
+
+describe('peer folders', () => {
+  it('records the folder a session joined from, for auto and chosen names', () => {
+    const { call, hub } = setup()
+    call({ op: 'claim', kind: 'claude', session: 'c1', folder: '/p/app' })
+    call({ op: 'claim', kind: 'agy', session: 's1', name: 'planner', folder: '/p/app' })
+    expect(hub.status().map(p => [p.name, p.folder])).toEqual([
+      ['app-claude', '/p/app'],
+      ['planner', '/p/app'],
+    ])
+  })
+  it('writes peers once per claim, folder included', () => {
+    const store = memoryStore()
+    let writes = 0
+    const save = store.savePeers
+    store.savePeers = p => {
+      writes++
+      save(p)
+    }
+    const { call } = setup(store)
+    call({ op: 'claim', kind: 'agy', session: 's1', name: 'planner', folder: '/p/app' })
+    expect(writes).toBe(1)
+    expect(store.peers[0]?.folder).toBe('/p/app')
+  })
+})
+
+describe('send by kind', () => {
+  it('sends to the one online peer of that kind in the folder, never the sender', () => {
+    const { call, listen } = setup()
+    call({ op: 'claim', kind: 'claude', session: 'c1', name: 'near', folder: '/p/app' })
+    call({ op: 'claim', kind: 'claude', session: 'c2', name: 'me', folder: '/p/app' })
+    call({ op: 'claim', kind: 'claude', session: 'c3', name: 'far', folder: '/p/other' })
+    listen('near', 'claude', 'c1')
+    listen('me', 'claude', 'c2')
+    listen('far', 'claude', 'c3')
+    expect(call({ op: 'send', from: 'me', toKind: 'claude', folder: '/p/app', text: 'hi' }).last()).toMatchObject({ type: 'sent', to: 'near', live: true })
+  })
+
+  it('refuses when no peer or several peers match, naming them', () => {
+    const { call, listen } = setup()
+    call({ op: 'claim', kind: 'claude', session: 'c1', name: 'a', folder: '/p/app' })
+    listen('a', 'claude', 'c1')
+    expect(call({ op: 'send', from: 'shell', toKind: 'agy', folder: '/p/app', text: 'x' }).last()).toMatchObject({
+      type: 'error',
+      message: expect.stringMatching(/no online agy peer in this folder/),
+    })
+    expect(call({ op: 'send', from: 'shell', toKind: 'claude', folder: '/p/x', text: 'x' }).last()).toMatchObject({
+      message: expect.stringMatching(/Online elsewhere: a\./),
+    })
+    call({ op: 'claim', kind: 'claude', session: 'c2', name: 'b', folder: '/p/app' })
+    listen('b', 'claude', 'c2')
+    expect(call({ op: 'send', from: 'shell', toKind: 'claude', folder: '/p/app', text: 'x' }).last()).toMatchObject({
+      message: expect.stringMatching(/2 online claude peers in this folder: a, b/),
+    })
   })
 })

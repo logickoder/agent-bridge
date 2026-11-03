@@ -15,6 +15,8 @@ export const claude: Adapter = {
   joinHint: 'Claude: type `/bridge [name]` (or `agent-bridge claude [--as name]` for a channel).',
   sessionEnv: SESSION_ENV,
   joined: async (name, pushed) => (await import('./format.js')).joinedText(name, pushed),
+  // Only the socket path, never the messaging token: safe to keep on disk across daemon restarts.
+  alive: async endpoint => (await import('./socket.js')).alive(endpoint),
   pushEndpoint: async env => (await import('./socket.js')).endpointFromEnv(env),
   deliver: async (endpoint, msg) => (await import('./socket.js')).deliver(endpoint, msg),
   serveMcp: async () => {

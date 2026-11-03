@@ -31,6 +31,7 @@ export function runDaemon(): void {
   }
   const hub = new Hub({ store: fileStore(), now: () => new Date(), newId: () => randomUUID().slice(0, 8), pid: process.pid,
     log,
+    probe: kind => ADAPTERS[kind].alive,
     deliver: async (kind, endpoint, msg) => {
       const deliver = ADAPTERS[kind].deliver
       if (!deliver) throw new Error(`${kind} has no push delivery.`)

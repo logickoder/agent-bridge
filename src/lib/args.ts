@@ -1,4 +1,4 @@
-import { PeerName } from '../schema.js'
+import { PEER_KINDS, PeerKind, PeerName } from '../schema.js'
 
 /** Removes `--flag value` from args and returns the value. */
 export function takeFlag(args: string[], flag: string): string | undefined {
@@ -21,4 +21,11 @@ export function peerName(value: string | undefined, what: string): string {
   const parsed = PeerName.safeParse(value)
   if (parsed.success) return parsed.data
   throw new Error(`${what} ${value === undefined ? 'is missing' : `"${value}" is invalid`}. ${parsed.error.issues[0]?.message ?? ''}`.trim())
+}
+
+/** Parses a kind id with a readable error that lists the kinds. */
+export function peerKind(value: string | undefined, what: string): PeerKind {
+  const parsed = PeerKind.safeParse(value)
+  if (parsed.success) return parsed.data
+  throw new Error(`${what} ${value === undefined ? 'is missing a kind' : `"${value}" is not a kind`}. Kinds: ${PEER_KINDS.join(', ')}.`)
 }
