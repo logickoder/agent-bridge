@@ -1,9 +1,13 @@
 {
-  "name": "agent-bridge",
+  "name": "@logickoder/agent-bridge",
   "version": "0.1.0",
-  "description": "Live messaging between agent CLI sessions (Claude Code, agy) as named peers",
+  "description": "Live messaging between agent CLI sessions (Claude Code, Antigravity, opencode). Each message wakes the receiving session in place.",
+  "author": {
+    "name": "Jeffery Orazulike",
+    "email": "jeffery@logickoder.dev",
+    "url": "https://logickoder.dev"
+  },
   "type": "module",
-  "private": true,
   "bin": {
     "agent-bridge": "dist/cli.js"
   },
@@ -16,7 +20,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --dir src",
     "test:e2e": "pnpm build && vitest run --dir test",
-    "check": "pnpm typecheck && pnpm test && pnpm test:e2e"
+    "check": "pnpm typecheck && pnpm test && pnpm test:e2e",
+    "prepack": "pnpm check"
   },
   "dependencies": {
     "zod": "^4.6.7"
@@ -29,6 +34,30 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/logickoder/agent-bridge.git"
+    "url": "git+https://github.com/logickoder/agent-bridge.git"
+  },
+  "files": [
+    "dist",
+    "src/adapters/agy/skill",
+    "src/adapters/claude/plugin",
+    ".claude-plugin",
+    "docs/assets/logo.svg",
+    "docs/assets/how-it-works.svg"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "claude-code",
+    "antigravity",
+    "agy",
+    "opencode",
+    "ai-agents",
+    "agent-to-agent",
+    "cli"
+  ],
+  "homepage": "https://github.com/logickoder/agent-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/logickoder/agent-bridge/issues"
   }
 }
