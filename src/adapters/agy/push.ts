@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process'
-import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import type { Message } from '../../schema.js'
+import { onPath } from '../../lib/config.js'
 import { formatPushed } from './format.js'
 import { SESSION_ENV } from './names.js'
 
 /**
- * Direct delivery into a live agy conversation with `agy agentapi send-message` (docs/agents/agy.md, finding 8). It wakes an
+ * Direct delivery into a live agy conversation with `agy agentapi send-message` (docs/agents/antigravity.md, finding 8). It wakes an
  * idle agy. Undocumented, so the listener and the hook stay as fallbacks. agy sets the address and CSRF token
  * in run_command's environment; `join` captures them, and the daemon keeps them in memory only.
  */
@@ -16,20 +16,6 @@ const DELIVER_TIMEOUT_MS = 10_000
 
 export type Run = (exe: string, args: string[], env: NodeJS.ProcessEnv) => Promise<{ code: number | null; stdout: string }>
 
-/** First executable `name` on PATH. */
-export function onPath(name: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
-  for (const dir of (env['PATH'] ?? '').split(path.delimiter)) {
-    if (!dir) continue
-    const file = path.join(dir, name)
-    try {
-      fs.accessSync(file, fs.constants.X_OK)
-      return file
-    } catch {
-      // not here
-    }
-  }
-  return undefined
-}
 
 /** The push endpoint for this agy conversation, if run_command's environment has everything agentapi needs. */
 export function endpointFromEnv(

@@ -49,3 +49,18 @@ export function unlinkBin(dst: string, src: string): boolean {
   fs.unlinkSync(dst)
   return true
 }
+
+/** First executable `name` on PATH. */
+export function onPath(name: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  for (const dir of (env['PATH'] ?? '').split(path.delimiter)) {
+    if (!dir) continue
+    const file = path.join(dir, name)
+    try {
+      fs.accessSync(file, fs.constants.X_OK)
+      return file
+    } catch {
+      // not here
+    }
+  }
+  return undefined
+}

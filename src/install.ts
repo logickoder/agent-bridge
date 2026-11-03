@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { ADAPTERS } from './adapters/index.js'
 import type { InstallContext } from './adapters/types.js'
-import { linkBin, unlinkBin } from './lib/config.js'
+import { linkBin, onPath, unlinkBin } from './lib/config.js'
 import { REPO } from './paths.js'
 
 const CLI_REL = path.join('dist', 'cli.js')
@@ -27,10 +27,25 @@ export function installContext(env: NodeJS.ProcessEnv = process.env): InstallCon
 export async function install(ctx: InstallContext): Promise<string[]> {
   const cli = path.join(ctx.repo, CLI_REL)
   if (!fs.existsSync(cli)) throw new Error(`${CLI_REL} is missing. Run \`pnpm build\` first.`)
-  linkBin(ctx.exe, cli)
-  const lines = [`bin       ${ctx.exe}`]
+  // After `npm i -g` the CLI is already on PATH through npm's own link. Replacing that link would let
+  // uninstall delete it later while the npm package stays installed.
+  const existing = onPath('agent-bridge', ctx.env)
+  const lines: string[] = []
+  let target = ctx
+  if (existing && fs.realpathSync(existing) === fs.realpathSync(cli)) {
+    lines.push(`bin       already on PATH: ${existing}`)
+    // Adapters write this path into other tools' config, so it must be the one that exists. binDir stays:
+    // uninstall gets the same one, and legacy cleanup looks where install linked before.
+    target = { ...ctx, exe: existing }
+  } else {
+    linkBin(ctx.exe, cli)
+    lines.push(`bin       ${ctx.exe}`)
+    if (existing && path.resolve(existing) !== path.resolve(ctx.exe)) {
+      lines.push(`bin       warning: ${existing} comes first on PATH and is another agent-bridge. Remove it, or put ${path.dirname(ctx.exe)} first.`)
+    }
+  }
   // One adapter after another: they report in a fixed order.
-  for (const a of Object.values(ADAPTERS)) lines.push(...(await a.install(ctx)))
+  for (const a of Object.values(ADAPTERS)) lines.push(...(await a.install(target)))
   return lines
 }
 

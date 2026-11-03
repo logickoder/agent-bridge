@@ -509,6 +509,35 @@ describe('daemon', () => {
 })
 
 describe('install', () => {
+  it('leaves an npm-installed agent-bridge on PATH alone, on install and uninstall', () => {
+    // npm's global bin link is relative; simulate it in its own folder on PATH.
+    // Resolve first: the temp dir sits behind a macOS symlink, and a relative link from the unresolved path breaks.
+    fs.mkdirSync(path.join(HOME, 'npm-bin'), { recursive: true })
+    const npmBin = fs.realpathSync(path.join(HOME, 'npm-bin'))
+    const ourBin = path.join(HOME, 'our-bin')
+    const npmLink = path.join(npmBin, 'agent-bridge')
+    fs.symlinkSync(path.relative(npmBin, fs.realpathSync(CLI)), npmLink)
+    const fakeClaude = path.join(HOME, 'fake-claude-npm')
+    fs.writeFileSync(fakeClaude, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    const targets = {
+      // Only the simulated npm bin, never the machine's real install.
+      PATH: `${npmBin}:/usr/bin:/bin`,
+      AGENT_BRIDGE_BIN_DIR: ourBin,
+      AGENT_BRIDGE_CLAUDE_BIN: fakeClaude,
+      AGY_CONFIG_DIR: path.join(HOME, 'agy-npm'),
+      OPENCODE_CONFIG_DIR: path.join(HOME, 'opencode-npm'),
+    }
+    expect(run(['install'], targets)).toMatch(/already on PATH/)
+    expect(fs.existsSync(path.join(ourBin, 'agent-bridge'))).toBe(false)
+    // Antigravity's config must point at the agent-bridge that exists: npm's, not a link install skipped.
+    const mcpConfig = JSON.parse(fs.readFileSync(path.join(HOME, 'agy-npm', 'mcp_config.json'), 'utf8')) as {
+      mcpServers: Record<string, { command: string }>
+    }
+    expect(mcpConfig.mcpServers['agent-bridge']?.command).toBe(npmLink)
+    run(['uninstall'], targets)
+    expect(fs.readlinkSync(npmLink)).toBe(path.relative(npmBin, fs.realpathSync(CLI)))
+  })
+
   it('adds and removes only agent-bridge entries, idempotently', () => {
     const agyDir = path.join(HOME, 'agy')
     const binDir = path.join(HOME, 'bin')
@@ -524,7 +553,8 @@ describe('install', () => {
     fs.mkdirSync(binDir, { recursive: true })
     fs.symlinkSync(path.join(REPO, 'bin', 'claude-bridge'), path.join(binDir, 'claude-bridge'))
     const opencodeDir = path.join(HOME, 'opencode')
-    const targets = { AGY_CONFIG_DIR: agyDir, AGENT_BRIDGE_BIN_DIR: binDir, AGENT_BRIDGE_CLAUDE_BIN: fakeClaude, OPENCODE_CONFIG_DIR: opencodeDir }
+    // A PATH without the real install, which would make install skip its own link.
+    const targets = { PATH: '/usr/bin:/bin', AGY_CONFIG_DIR: agyDir, AGENT_BRIDGE_BIN_DIR: binDir, AGENT_BRIDGE_CLAUDE_BIN: fakeClaude, OPENCODE_CONFIG_DIR: opencodeDir }
     run(['install'], targets)
     run(['install'], targets)
 
