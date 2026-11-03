@@ -1,0 +1,152 @@
+name: Publish to npm
+
+# Push to main: publishes only when package.json holds a version npm does not have yet.
+# Bump the version in a commit to release; other pushes skip.
+# Manual run: bumps the version (patch by default), commits it, and publishes.
+#
+# Two jobs. `check` installs dependencies and runs their code, so it gets no publish rights.
+# `publish` runs no dependency code: it takes the built package from `check` and publishes it.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+permissions: {}
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      name: ${{ steps.version.outputs.name }}
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # Version comes from packageManager in package.json.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          NAME=$(node -p "require('./package.json').name")
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            npm version "$BUMP" --no-git-tag-version
+          fi
+          VERSION=$(node -p "require('./package.json').version")
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "$NAME@$VERSION is already on npm. Skipped. Bump the version in package.json, or run this workflow by hand." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Reads the lockfile only, so it runs before any dependency code. Runtime dependencies only: dev tools
+      # never ship, and this job cannot publish.
+      - name: Audit
+        if: steps.version.outputs.publish == 'true'
+        run: pnpm audit --prod --audit-level high
+
+      - name: Install dependencies
+        if: steps.version.outputs.publish == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # Typecheck, unit and e2e. e2e builds dist first.
+      - name: Check
+        if: steps.version.outputs.publish == 'true'
+        run: pnpm check
+
+      # package.json carries the bumped version on a manual run.
+      - name: Upload build
+        if: steps.version.outputs.publish == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package
+          path: |
+            dist
+            package.json
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: check
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # npm Trusted Publishing (OIDC), no token secret
+      contents: write # release commit and tag
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      # Node 24 for its npm 11, which Trusted Publishing needs. engines stays >=22.
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Download build
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: package
+
+      - name: Commit version bump
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore(release): $VERSION [skip ci]"
+          git push origin HEAD:main
+
+      # npm, not pnpm: nothing is downloaded and run in this job. --ignore-scripts: prepack would rerun the
+      # checks, and no package script runs where the publish token is.
+      - name: Publish
+        run: npm publish --access public --ignore-scripts
+
+      - name: Tag release
+        env:
+          NAME: ${{ needs.check.outputs.name }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+          echo "Published $NAME@$VERSION, tagged v$VERSION." >> "$GITHUB_STEP_SUMMARY"
