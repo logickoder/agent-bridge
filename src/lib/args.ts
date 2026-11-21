@@ -1,4 +1,4 @@
-import { PEER_KINDS, PeerKind, PeerName } from '../schema.js'
+import { Address, PEER_KINDS, PeerKind, PeerName } from '../schema.js'
 
 /** Removes `--flag value` from args and returns the value. */
 export function takeFlag(args: string[], flag: string): string | undefined {
@@ -21,6 +21,14 @@ export function peerName(value: string | undefined, what: string): string {
   const parsed = PeerName.safeParse(value)
   if (parsed.success) return parsed.data
   throw new Error(`${what} ${value === undefined ? 'is missing' : `"${value}" is invalid`}. ${parsed.error.issues[0]?.message ?? ''}`.trim())
+}
+
+/** Parses a peer name or `<agent>@<member>` with a readable error. */
+export function address(value: string | undefined, what: string): string {
+  const parsed = Address.safeParse(value)
+  if (parsed.success) return parsed.data
+  const why = 'Use a peer name, or <agent>@<member> for another user\'s agent on your network.'
+  throw new Error(`${what} ${value === undefined ? 'is missing' : `"${value}" is invalid`}. ${why}`)
 }
 
 /** Parses a kind id with a readable error that lists the kinds. */

@@ -2,9 +2,10 @@
 import { ADAPTERS } from './adapters/index.js'
 import type { Command } from './adapters/types.js'
 import { request, resolveName, stopDaemon } from './client/index.js'
-import { formatPeers, formatSent } from './format.js'
-import { peerKind, peerName, takeFlag, takeSwitch } from './lib/args.js'
+import { formatPeers, formatSent, remoteView } from './format.js'
+import { address, peerKind, peerName, takeFlag, takeSwitch } from './lib/args.js'
 import { toError } from './lib/errors.js'
+import { askTerminal } from './lib/tty.js'
 import { logger } from './lib/log.js'
 import { sessionTag } from './names.js'
 import { HOME } from './paths.js'
@@ -23,6 +24,7 @@ const USAGE = [
   '  whoami                         this session\'s peer name(s), from the agent\'s session id',
   '  send [--as me] <to|--to-kind k> <text...>  send; --to-kind: the one online peer of that kind in this folder',
   '  leave <name>                   unbind a peer and stop its listeners',
+  '  net host|invite|connect|status|share|unshare|verify|...  networks across machines: `agent-bridge net help`',
   '  restart                        stop the daemon; the next client starts the new one',
   `  mcp <kind>                     MCP server for one agent kind: ${adapters.map(a => a.kind).join(', ')}`,
   ...adapters.flatMap(a => Object.values(a.commands).map(c => `  ${c.usage}`)),
@@ -67,7 +69,7 @@ async function main(argv: string[]): Promise<void> {
       // --to-kind <kind> instead of a name: the daemon picks the one online peer of that kind in this folder.
       const byKind = rest[0] === '--to-kind'
       const words = byKind ? rest.slice(2) : rest.slice(1)
-      const target = byKind ? { toKind: peerKind(rest[1], '--to-kind'), folder: process.cwd() } : { to: peerName(rest[0], 'Recipient') }
+      const target = byKind ? { toKind: peerKind(rest[1], '--to-kind'), folder: process.cwd() } : { to: address(rest[0], 'Recipient') }
       // The agent sessions this shell belongs to. The daemon checks `from` against them. Without --as the
       // sender is plain `shell`, which no session holds, so no session is attached and it goes unverified.
       const sessions = args[0] !== '--as' ? [] : envSessions().map(s => s.id)
@@ -76,7 +78,7 @@ async function main(argv: string[]): Promise<void> {
     }
     case 'status': {
       const r = await request({ op: 'status' }, 'status')
-      return out(JSON.stringify({ pid: r.pid, home: HOME, peers: r.peers }, null, 2))
+      return out(JSON.stringify({ pid: r.pid, home: HOME, peers: r.peers, ...(r.network ? { network: r.network, remote: r.remote } : {}) }, null, 2))
     }
     case 'join': {
       const noPush = takeSwitch(args, '--no-push')
@@ -102,8 +104,8 @@ async function main(argv: string[]): Promise<void> {
       return out(`Joined agent-bridge as "${name}".\n${await adapter.joined(name, pushed)}${note}\n${formatPeers(list, { self: name, folder: cwd })}`)
     }
     case 'peers': {
-      const { peers: list } = await request({ op: 'status' }, 'status')
-      return out(formatPeers(list, { all: takeSwitch(args, '--all'), folder: process.cwd() }))
+      const r = await request({ op: 'status' }, 'status')
+      return out(formatPeers(r.peers, { all: takeSwitch(args, '--all'), folder: process.cwd(), ...remoteView(r) }))
     }
     case 'whoami': {
       const sessions = envSessions().map(s => s.id)
@@ -114,6 +116,11 @@ async function main(argv: string[]): Promise<void> {
       if (mine.length) return out(mine.map(p => p.name).join('\n'))
       return out(['This session is not on the bridge. To join:', ...adapters.map(a => `  ${a.joinHint}`)].join('\n'))
     }
+    case 'keeper':
+      // Started by `net host`. Not for people: see src/net/keeper.ts.
+      return (await import('./net/keeper.js')).runKeeper(args)
+    case 'net':
+      return (await import('./net/cli.js')).runNet(args, { sessions: () => envSessions().map(s => s.id), out, confirm: askTerminal })
     case 'leave': {
       const name = peerName(args[0], 'Peer name')
       await request({ op: 'leave', as: name }, 'ok')

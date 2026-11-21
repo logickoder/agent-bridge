@@ -1,4 +1,4 @@
-import { fenceBody, messageHeader, replyOr } from '../../format.js'
+import { fenceBody, messageHeader, remoteCaution, replyOr } from '../../format.js'
 import type { Message } from '../../schema.js'
 
 // Monitor events are single lines, so every message and notice fits on one.
@@ -7,12 +7,13 @@ const sendCommand = (as: string, to: string): string => `agent-bridge send --as 
 
 /** One monitor line per message: sender, recipient, the text with newlines escaped, and how to reply. */
 export function monitorLine(m: Message): string {
-  return `${messageHeader(m)}, text as JSON: ${JSON.stringify(m.text)} ${replyOr(m, `Reply with: ${sendCommand(m.to, m.from)}`)}`
+  return [`${messageHeader(m)}, text as JSON: ${JSON.stringify(m.text)}`, replyOr(m, `Reply with: ${sendCommand(m.to, m.from)}`), remoteCaution(m)].filter(Boolean).join(' ')
 }
 
 /** What the inbox socket delivers. Claude shows it as a message from another session. */
 export function socketText(m: Message): string {
-  return `${messageHeader(m)}:\n${fenceBody(m.text)}\n\n${replyOr(m, `Reply with: ${sendCommand(m.to, m.from)}`)}`
+  const caution = remoteCaution(m)
+  return `${messageHeader(m)}:\n${fenceBody(m.text)}\n\n${replyOr(m, `Reply with: ${sendCommand(m.to, m.from)}`)}${caution ? `\n${caution}` : ''}`
 }
 
 /** What `join` prints for Claude after the name. */
