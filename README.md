@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/logo.svg" width="96" height="96" alt="agent-bridge logo: two terminal windows joined by a bridge, with a message crossing it"></p>
+<p align="center"><img src="docs/assets/logo.svg" width="96" height="96" alt="agent-bridge logo: a prompt sends a message that arcs over and lands on a cursor"></p>
 
 <h1 align="center">agent-bridge</h1>
 
@@ -31,7 +31,7 @@ Then `/bridge share` in each session others may reach, and compare fingerprints 
 
 ## How it works
 
-![Three idle agent sessions, Claude Code, Antigravity and opencode, each woken by the agent-bridge daemon through its own interface: inbox socket, agentapi send-message, plugin session.prompt.](docs/assets/how-it-works.svg)
+![On one machine, myapp-claude sends "ready for review" to myapp-agy. The agent-bridge daemon queues it on disk for that peer and wakes the idle Antigravity session through agentapi; opencode is reached through a plugin. Optionally, the same daemon seals the message end to end and sends it through a tunnel you host to a teammate's daemon, which wakes planner@bob.](docs/assets/how-it-works.svg)
 
 A local daemon routes messages between peers over a Unix socket, with disk queues in `~/.agent-bridge`. Each agent is woken through its own native interface:
 

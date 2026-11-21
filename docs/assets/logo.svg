@@ -1,22 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="6 40 256 256" width="64" height="64" role="img" aria-labelledby="title">
   <title id="title">agent-bridge</title>
   <style>
-    .line { stroke: #1f2328; }
-    .msg { fill: #0969da; }
+    .ink { fill: #1f2328; }
+    .msg { fill: #15803d; }
     @media (prefers-color-scheme: dark) {
-      .line { stroke: #e6edf3; }
-      .msg { fill: #4493f8; }
+      .ink { fill: #e6edf3; }
+      .msg { fill: #3fcf6e; }
     }
   </style>
-  <!-- Two agent sessions, joined by a low bridge, with a message on its way across -->
-  <g transform="translate(0 2)">
-    <g class="line" fill="none" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3.5" y="28" width="21" height="19" rx="4.5"/>
-      <rect x="39.5" y="28" width="21" height="19" rx="4.5"/>
-      <path d="M9.5 34l5 4-5 4"/>
-      <path d="M45.5 34l5 4-5 4"/>
-      <path d="M14 28 C 20 15, 44 15, 50 28"/>
-    </g>
-    <circle class="msg" cx="32" cy="18.4" r="5"/>
-  </g>
+  <!-- A prompt sends a message: it arcs over and lands on the next session's cursor -->
+  <path class="msg" d="M76.686 156.686A80 80 0 0 1 213.255 213.255H181.255A48 48 0 0 0 99.314 179.314Z"/>
+  <path class="ink" d="M43.314 100.686 110.627 168 43.314 235.314 20.686 212.686 65.373 168 20.686 123.314Z M181.255 200H248V232H181.255Z"/>
 </svg>
