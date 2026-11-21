@@ -52,6 +52,8 @@ export interface Home {
   fail: (args: string[], extra?: Record<string, string>, input?: string) => string
   /** Runs the CLI on a pseudo-terminal, typing `input`: for prompts that refuse a pipe. Returns all it printed. */
   tty: (args: string[], input: string) => string
+  /** Like tty, but returns everything printed by a command expected to fail. */
+  ttyFail: (args: string[], input: string) => string
   start: (args: string[], extra?: Record<string, string>) => Proc
   /** Stops every process started here, then the daemon, and deletes the home. */
   dispose: () => Promise<void>
@@ -75,6 +77,15 @@ export function home(tag: string): Home {
   }
   const tty = (args: string[], input: string): string =>
     execFileSync('python3', ['-c', PTY, process.execPath, CLI, ...args], { env, encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'] })
+  const ttyFail = (args: string[], input: string): string => {
+    try {
+      tty(args, input)
+    } catch (err) {
+      // On a pseudo-terminal, stderr arrives on the same stream as stdout.
+      return err instanceof Error && 'stdout' in err ? String(err.stdout) : String(err)
+    }
+    throw new Error(`expected \`${args.join(' ')}\` to fail`)
+  }
   const start = (args: string[], extra: Record<string, string> = {}): Proc => {
     const p = spawn(process.execPath, [CLI, ...args], { env: { ...env, ...extra } })
     procs.push(p)
@@ -108,7 +119,7 @@ export function home(tag: string): Home {
     }
     fs.rmSync(dir, { recursive: true, force: true })
   }
-  return { dir, env, run, fail, tty, start, dispose }
+  return { dir, env, run, fail, tty, ttyFail, start, dispose }
 }
 
 /** Every file under `dir`, as one string, for checks that something never reached the disk. */

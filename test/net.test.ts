@@ -127,8 +127,11 @@ describe('network across three homes', { timeout: 40_000 }, () => {
   })
 
   it('refuses a wrong fingerprint and accepts the right one', async () => {
-    expect(A.fail(['net', 'verify', 'carol', 'AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA'])).toMatch(/may be intercepting/)
-    expect(A.run(['net', 'verify', 'carol', fingerprintOf(B).toLowerCase()])).toMatch(/carol's key is verified/)
+    // Marking a key verified is the user's call: never from an agent session, and only on a terminal.
+    expect(A.fail(['net', 'verify', 'carol', fingerprintOf(B)], { CLAUDE_CODE_SESSION_ID: 'sess-1' })).toMatch(/An agent session cannot mark carol's key verified/)
+    expect(A.fail(['net', 'verify', 'carol', fingerprintOf(B)])).toMatch(/Verifying a key needs your terminal/)
+    expect(A.ttyFail(['net', 'verify', 'carol', 'AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA'], 'verify carol\n')).toMatch(/may be intercepting/)
+    expect(A.tty(['net', 'verify', 'carol', fingerprintOf(B).toLowerCase()], 'verify carol\n')).toMatch(/carol's key is verified/)
     expect(A.run(['net', 'status'])).toMatch(/carol +(online|offline) +verified/)
     await until(() => remote(A).some(r => r.address === `${B_AGENT}@carol` && r.keyVerified), 'verified in status')
   })
