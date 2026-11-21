@@ -333,7 +333,7 @@ export class NetService {
       if (!fresh) this.log(`the trial tunnel restarted at a new address, ${k.url}. Connected members follow. Send members who were offline: agent-bridge net set-url ${update}`)
     } catch (err) {
       if (fresh) throw err
-      this.log(`the port keeper did not start: ${toError(err).message}. Members cannot reach this network until it does.`)
+      this.log(`the port keeper did not start: ${toError(err).message} Members cannot reach this network until it does.`)
     }
   }
 
