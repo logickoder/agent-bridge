@@ -27,7 +27,7 @@ agent-bridge net invite                                                   # a si
 agent-bridge net connect -                                                # the guest pastes it
 ```
 
-Then `/bridge share` in each session others may reach, and compare fingerprints with each member by call (`agent-bridge net verify <handle> <code>`). Messages are end-to-end encrypted between members; the host cannot read them once fingerprints are compared. To try it without a tunnel of your own: `agent-bridge net host --tunnel cloudflared`. Setup: [docs/install.md](docs/install.md#networks). Trust, levels and limits: [docs/concepts.md](docs/concepts.md#networks).
+Then `/bridge share` in each session others may reach, and compare fingerprints with each member by call, then run `agent-bridge net verify <handle> <code>` in your own terminal. Messages are end-to-end encrypted between members; the host cannot read them once fingerprints are compared. To try it without a tunnel of your own: `agent-bridge net host --tunnel cloudflared`. Setup: [docs/install.md](docs/install.md#networks). Trust, levels and limits: [docs/concepts.md](docs/concepts.md#networks).
 
 ## How it works
 
