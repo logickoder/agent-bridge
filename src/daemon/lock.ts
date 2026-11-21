@@ -4,7 +4,8 @@ import { errnoCode } from '../lib/errors.js'
 /** A lock file without a pid older than this is debris from a crash, not a daemon starting up. */
 const UNREADABLE_STALE_MS = 5000
 
-const isAlive = (pid: number): boolean => {
+/** True if a process with this pid exists, even one owned by another user. */
+export const isAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0)
     return true

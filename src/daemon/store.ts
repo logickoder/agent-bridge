@@ -2,44 +2,38 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import type { Store } from './hub.js'
-import { readJson, writeJson } from '../lib/json-file.js'
+import { readJsonDir, readOrSetAside, writeJson } from '../lib/json-file.js'
 import { logger } from '../lib/log.js'
-import { ENDPOINTS_FILE, ensureHome, PEERS_FILE, QUEUE_DIR } from '../paths.js'
-import { Message, Peer, PeerName, SavedEndpoint } from '../schema.js'
+import { ENDPOINTS_FILE, ensureHome, NET_OUTBOX, PEERS_FILE, QUEUE_DIR } from '../paths.js'
+import { Message, Peer, PeerName, RemoteAddress, SavedEndpoint } from '../schema.js'
+import { isOutboxKey } from './hub.js'
 
 const log = logger('store')
 
-/** Reads a state file. A corrupt one is moved aside so the daemon still starts. */
-function readOrSetAside<S extends z.ZodType>(file: string, schema: S): z.infer<S> | undefined {
-  const read = readJson(file, schema)
-  if (read.status === 'ok') return read.value
-  if (read.status === 'invalid') {
-    const aside = `${file}.corrupt-${Date.now()}`
-    fs.renameSync(file, aside)
-    log(`${file} ${read.reason}. Moved to ${aside}.`)
-  }
-  return undefined
+/** Local peer queues live in `queue/`, network outbox queues in `net/outbox/`. */
+const queueFile = (name: string): string => path.join(isOutboxKey(name) ? NET_OUTBOX : QUEUE_DIR, `${name}.json`)
+
+function loadQueues(dir: string, valid: z.ZodType<string>, into: Map<string, Message[]>): void {
+  for (const [name, queue] of readJsonDir(dir, valid, z.array(Message), log)) into.set(name, queue ?? [])
 }
 
 export function fileStore(): Store {
   return {
     load() {
       ensureHome()
-      const stored = readOrSetAside(PEERS_FILE, z.array(Peer))
+      const stored = readOrSetAside(PEERS_FILE, z.array(Peer), log)
       const peers = stored ?? []
       if (!stored) writeJson(PEERS_FILE, peers)
       const queues = new Map<string, Message[]>()
-      for (const f of fs.readdirSync(QUEUE_DIR)) {
-        const name = f.replace(/\.json$/, '')
-        if (!f.endsWith('.json') || !PeerName.safeParse(name).success) continue
-        queues.set(name, readOrSetAside(path.join(QUEUE_DIR, f), z.array(Message)) ?? [])
-      }
-      const endpoints = readOrSetAside(ENDPOINTS_FILE, z.array(SavedEndpoint)) ?? []
+      loadQueues(QUEUE_DIR, PeerName, queues)
+      loadQueues(NET_OUTBOX, RemoteAddress, queues)
+      const endpoints = readOrSetAside(ENDPOINTS_FILE, z.array(SavedEndpoint), log) ?? []
       return { peers, queues, endpoints }
     },
     savePeers: peers => writeJson(PEERS_FILE, peers),
-    saveQueue: (name, msgs) => writeJson(path.join(QUEUE_DIR, `${name}.json`), msgs),
+    // Outbox messages are for another user's agent: private like everything else under net/.
+    saveQueue: (name, msgs) => writeJson(queueFile(name), msgs, isOutboxKey(name) ? { mode: 0o600 } : {}),
     saveEndpoints: endpoints => writeJson(ENDPOINTS_FILE, endpoints),
-    dropQueue: name => fs.rmSync(path.join(QUEUE_DIR, `${name}.json`), { force: true }),
+    dropQueue: name => fs.rmSync(queueFile(name), { force: true }),
   }
 }

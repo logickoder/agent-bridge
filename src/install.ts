@@ -54,5 +54,7 @@ export async function uninstall(ctx: InstallContext): Promise<string[]> {
   const done: string[] = []
   for (const a of Object.values(ADAPTERS)) done.push(...(await a.uninstall(ctx)))
   if (unlinkBin(ctx.exe, path.join(ctx.repo, CLI_REL))) done.push(`removed ${ctx.exe}`)
+  // The port keeper (and a trial tunnel) would otherwise keep running after the bridge is gone.
+  if ((await import('./net/keeper.js')).stopKeeper()) done.push('stopped the network port keeper')
   return done
 }

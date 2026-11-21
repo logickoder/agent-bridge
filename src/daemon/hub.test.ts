@@ -49,7 +49,7 @@ function setup(store = memoryStore(), log: (msg: string) => void = () => {}, del
   let n = 0
   const clock = { now: new Date('2026-11-02T00:00:00Z') }
   const hub = new Hub({ store, now: () => clock.now, newId: () => `m${++n}`, pid: 1, log, ...(deliver ? { deliver } : {}), probe: kind => (kind === 'claude' ? alive : undefined) })
-  const call = (req: Exclude<Request, { op: 'shutdown' }>, conn = new FakeConn()): FakeConn => {
+  const call = (req: Exclude<Request, { op: 'shutdown' | 'net' }>, conn = new FakeConn()): FakeConn => {
     hub.handle(req, conn)
     return conn
   }
@@ -95,7 +95,7 @@ describe('send', () => {
     listen('agy', 'agy').end()
     hub.disconnect(new FakeConn())
     const r = send('agy', 'hi').last()
-    expect(r).toEqual({ type: 'sent', to: 'agy', id: 'm1', live: false, pushed: false, queued: 1, listening: [] })
+    expect(r).toEqual({ type: 'sent', to: 'agy', id: 'm1', live: false, pushed: false, queued: 1, listening: [], via: 'local' })
   })
 })
 

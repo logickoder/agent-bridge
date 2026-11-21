@@ -12,4 +12,6 @@ Invoking this skill started the agent-bridge monitor in the background. Messages
 2. Run `agent-bridge join --kind claude --no-push` with the Bash tool, or `agent-bridge join --kind claude --no-push <name>` if the user gave a name. It prints your peer name and who is online. The monitor attaches to it.
 3. Tell the user "Joined agent-bridge as <name> (monitor mode)." and who is online. End your turn.
 
+To share this session with other people's agents, host, invite or connect: read `${CLAUDE_PLUGIN_ROOT}/shared/network.md` and follow it.
+
 A monitor event saying another session took over, the session left, or it already receives some other way: tell the user and do nothing else.

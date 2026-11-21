@@ -1,6 +1,7 @@
-import { BRIDGE_SENDER } from '../format.js'
+import { BRIDGE_SENDER, verifyHint } from '../format.js'
+import { toError } from '../lib/errors.js'
 import { autoBase, inFamily, nextFree, sessionTag } from '../names.js'
-import type { Message, Peer, PeerKind, PeerStatus, Reply, Request, SavedEndpoint } from '../schema.js'
+import { MAX_REMOTE_TEXT, RemoteAddress, splitAddress, type Message, type NetworkStatus, type Origin, type Peer, type PeerKind, type PeerStatus, type RemotePeer, type Reply, type Request, type SavedEndpoint } from '../schema.js'
 
 /** A peer with nothing queued and no activity for this long is dropped, freeing its name. */
 const PRUNE_AFTER_MS = 24 * 3600_000
@@ -10,6 +11,52 @@ const PRUNE_QUEUED_AFTER_MS = 7 * 24 * 3600_000
 /** The bridge's own notices use this sender, so no peer may send as it, claim it or listen on it. */
 const RESERVED = `"${BRIDGE_SENDER}" is reserved for notices from the bridge itself. Pick another name.`
 const PERSIST_SEEN_MS = 3600_000
+/** At most this many messages from the network wait per local peer. More are left with the sender's host. */
+export const REMOTE_QUEUE_CAP = 50
+
+/** A shared agent as members see it, in presence. */
+export interface SharedPeer {
+  name: string
+  kind: PeerKind
+  online: boolean
+}
+
+/** An outbox key, `<agent>@<member>`: a queue for another user's agent, not a local peer. */
+export const isOutboxKey = (name: string): boolean => name.includes('@')
+
+/** The network as the link last saw it. The hub only reads it: routing checks and status. */
+export interface NetView {
+  network: string
+  /** This daemon's own member handle. */
+  self: string
+  connected: boolean
+  members: NetMember[]
+}
+
+export interface NetMember {
+  handle: string
+  keyVerified: boolean
+  /** The member's key changed and the user has not trusted the new one. */
+  blocked: boolean
+  peers: SharedPeer[]
+}
+
+/** A message from another member, already opened and checked by the link. */
+export interface Inbound {
+  fromAgent: string
+  member: string
+  to: string
+  text: string
+  origin: Origin
+}
+
+/**
+ * Why an inbound message was refused. Codes, not text: they travel back to the sender's member as a bounce.
+ * `busy`: the agent already has REMOTE_QUEUE_CAP unread network messages. Refusing (rather than waiting) keeps
+ * one idle agent from holding up the member's whole mailbox, and tells the sender to try later.
+ */
+export type RefusedCode = 'not-shared' | 'invalid-sender' | 'busy'
+export type InboundResult = 'stored' | { refused: RefusedCode }
 
 /** One client connection, as the hub sees it. */
 export interface Conn {
@@ -43,6 +90,8 @@ export interface HubDeps {
    * credential in its endpoints, so they are saved, and checked before they are restored after a restart.
    */
   probe?: (kind: PeerKind) => ((endpoint: Record<string, string>) => Promise<boolean>) | undefined
+  /** Told when the set of shared peers or their online state may have changed, so the link can publish it. */
+  net?: { changed(): void }
 }
 
 /** Status as clients see it: session ids become tags, and the previous session is dropped. */
@@ -78,7 +127,7 @@ class PushConn implements Conn {
     const msg = reply.msg
     this.deliver(this.kind, this.endpoint, msg).then(
       () => this.hub.handle({ op: 'ack', as: msg.to, id: msg.id }, this),
-      (err: unknown) => this.onDrop(this, err instanceof Error ? err.message : String(err)),
+      (err: unknown) => this.onDrop(this, toError(err).message),
     )
   }
 
@@ -106,7 +155,7 @@ interface Waiter {
 type ListenRequest = Extract<Request, { op: 'listen' }>
 type SendRequest = Extract<Request, { op: 'send' }>
 type ClaimRequest = Extract<Request, { op: 'claim' }>
-type HubRequest = Exclude<Request, { op: 'shutdown' }>
+type HubRequest = Exclude<Request, { op: 'shutdown' | 'net' }>
 
 /**
  * Message routing between named peers. Pure apart from the injected store, so it is tested without I/O.
@@ -137,6 +186,11 @@ export class Hub {
   private dirty = false
   /** lastSeen as last written to disk, per peer. Throttles touch() against what is stored, not in memory. */
   private readonly savedSeen = new Map<string, number>()
+  /** The network link: takes outbox messages one per remote key, acks with linkAck. */
+  private link: Conn | undefined
+  /** Outbox key to the id handed to the link and not yet acked. */
+  private readonly remoteInflight = new Map<string, string>()
+  private net: NetView | undefined
 
   constructor(private readonly deps: HubDeps) {
     const { peers, queues, endpoints } = deps.store.load()
@@ -179,17 +233,119 @@ export class Hub {
       case 'leave':
         this.leave(req.as)
         return this.reply(conn, { type: 'ok' })
+      case 'share': {
+        const refused = this.share(req.as, req.sessions, req.on)
+        return refused ? this.fail(conn, refused) : this.reply(conn, { type: 'ok' })
+      }
       case 'status':
-        return this.reply(conn, { type: 'status', pid: this.deps.pid, peers: this.status().map(redact) })
+        return this.reply(conn, {
+          type: 'status',
+          pid: this.deps.pid,
+          peers: this.status().map(redact),
+          remote: this.remotePeers(),
+          ...(this.net ? { network: this.networkStatus(this.net) } : {}),
+        })
     }
   }
 
   disconnect(conn: Conn): void {
     this.pending.delete(conn)
+    if (conn === this.link) return this.detachLink(conn)
     const waiter = this.byConn.get(conn)
     if (!waiter) return
     this.removeWaiter(waiter)
     this.pump(waiter.name)
+  }
+
+  // --- Network. The link does the I/O and timers; these stay synchronous and deterministic. ---
+
+  /** The link is ready to take outbox messages. */
+  attachLink(conn: Conn): void {
+    this.link = conn
+    this.remoteInflight.clear()
+    this.pumpRemoteAll()
+  }
+
+  /** The link went away. Messages it held stay at their queue heads. */
+  detachLink(conn: Conn): void {
+    if (this.link !== conn) return
+    this.link = undefined
+    this.remoteInflight.clear()
+  }
+
+  /** The host stored the message: drop it from the outbox and send the next one for that key. */
+  linkAck(key: string, id: string): void {
+    if (this.remoteInflight.get(key) !== id) return
+    const q = this.queue(key)
+    q.shift()
+    this.remoteInflight.delete(key)
+    // An outbox key exists per remote address ever used: drop it once empty rather than keep an empty file.
+    if (!q.length) {
+      this.queues.delete(key)
+      return this.deps.store.dropQueue(key)
+    }
+    this.deps.store.saveQueue(key, q)
+    this.pumpRemote(key)
+  }
+
+  /** The send failed. The message stays at the head; the link calls pumpRemoteAll after its backoff. */
+  linkRetry(key: string, id: string): void {
+    if (this.remoteInflight.get(key) === id) this.remoteInflight.delete(key)
+  }
+
+  pumpRemoteAll(): void {
+    for (const key of this.queues.keys()) if (isOutboxKey(key)) this.pumpRemote(key)
+  }
+
+  setNetwork(view: NetView | undefined): void {
+    this.net = view
+  }
+
+  /** A message from another member. Refused if the local peer is not shared, or `busy` when its network queue is full. */
+  inbound(m: Inbound): InboundResult {
+    // The sender ends up in a reply command an agent runs in a shell: only peer-name characters get through.
+    const from = `${m.fromAgent}@${m.member}`
+    if (!RemoteAddress.safeParse(from).success) return { refused: 'invalid-sender' }
+    const peer = this.peers.get(m.to)
+    // The same answer for unknown and unshared, so a guess learns nothing about which names exist here.
+    if (!peer?.shared) return { refused: 'not-shared' }
+    const q = this.queue(peer.name)
+    if (q.filter(x => x.origin).length >= REMOTE_QUEUE_CAP) return { refused: 'busy' }
+    q.push({ id: this.deps.newId(), from, to: peer.name, text: m.text, ts: this.deps.now().toISOString(), verified: false, origin: m.origin })
+    this.deps.store.saveQueue(peer.name, q)
+    this.pump(peer.name)
+    return 'stored'
+  }
+
+  /** Queues a notice from the bridge itself for a local peer, e.g. a bounce from the network. */
+  notify(name: string, text: string): void {
+    if (!this.peers.has(name)) return
+    const q = this.queue(name)
+    q.push({ id: this.deps.newId(), from: BRIDGE_SENDER, to: name, text, ts: this.deps.now().toISOString(), verified: true })
+    this.deps.store.saveQueue(name, q)
+    this.pump(name)
+  }
+
+  /** What the link publishes to other members. Names and kinds only: never folders or sessions. */
+  sharedPeers(): SharedPeer[] {
+    return [...this.peers.values()].filter(p => p.shared).map(p => ({ name: p.name, kind: p.kind, online: this.liveWaiters(p).length > 0 }))
+  }
+
+  /**
+   * Drops the outbox for a member that left or was removed, or with no member the whole outbox, when the network
+   * ends: kept, it would go to whoever holds that handle on the next network. Every sender is told.
+   */
+  dropRemote(member: string | undefined, why: string): void {
+    let dropped = 0
+    for (const [key, q] of [...this.queues]) {
+      if (!isOutboxKey(key) || (member !== undefined && !key.endsWith(`@${member}`))) continue
+      dropped += q.length
+      for (const m of q) this.notify(m.from, `Your message to ${key} (id ${m.id}) was not delivered: ${why}.`)
+      this.queues.delete(key)
+      this.remoteInflight.delete(key)
+      this.deps.store.dropQueue(key)
+    }
+    if (dropped) this.deps.log?.(`dropped ${dropped} outbox message(s)${member === undefined ? '' : ` for ${member}`}: ${why}`)
   }
 
   status(): PeerStatus[] {
@@ -233,6 +389,7 @@ export class Hub {
     const waiter: Waiter = { name: peer.name, conn, stream: req.stream, session }
     this.waitersOf(peer.name).push(waiter)
     this.byConn.set(conn, waiter)
+    if (peer.shared) this.netChanged()
     this.pump(peer.name)
   }
 
@@ -387,6 +544,7 @@ export class Hub {
     this.deps.store.dropQueue(from)
     this.deps.store.saveQueue(to, q)
     this.savePeers()
+    if (peer.shared) this.netChanged()
   }
 
   /** Moves a session's listeners from one name to another and releases the old name. */
@@ -443,6 +601,7 @@ export class Hub {
 
   private send(req: SendRequest, conn: Conn): void {
     if (req.from === BRIDGE_SENDER) return this.fail(conn, RESERVED)
+    if (req.to !== undefined && isOutboxKey(req.to)) return this.sendRemote(req, req.to, conn)
     const to = req.toKind ? this.nearest(req.toKind, req.folder ?? '', req.from) : { name: req.to ?? '' }
     if ('error' in to) return this.fail(conn, to.error)
     const peer = this.peers.get(to.name)
@@ -451,8 +610,7 @@ export class Hub {
       return this.fail(conn, `unknown peer "${to.name}". Known peers: ${known}. A peer is known once it joins the bridge.`)
     }
     // A sender inside an agent session must use a name that session holds. Without a session, it is unverified.
-    const holder = this.peers.get(req.from)
-    const verified = req.sessions?.length ? holder?.session != null && req.sessions.includes(holder.session) : false
+    const verified = this.holds(req.from, req.sessions)
     if (req.sessions?.length && !verified) {
       return this.fail(conn, `"${req.from}" is not this session's name. Send as your own name; \`agent-bridge whoami\` prints it.`)
     }
@@ -468,7 +626,77 @@ export class Hub {
     const pushed = sentNow && head.waiter.conn.async === true
     const live = sentNow && !pushed
     const listening = this.liveWaiters(peer).length ? [] : this.othersListening([peer.name, req.from])
-    this.reply(conn, { type: 'sent', to: peer.name, id: msg.id, live, pushed, queued: q.length, listening })
+    this.reply(conn, { type: 'sent', to: peer.name, id: msg.id, live, pushed, queued: q.length, listening, via: 'local' })
+  }
+
+  /** A send to `<agent>@<member>`: checked here, stored in the outbox, carried by the link. */
+  private sendRemote(req: SendRequest, to: string, conn: Conn): void {
+    const net = this.net
+    if (!net) return this.fail(conn, 'No network. Run `agent-bridge net connect <invite>` or `agent-bridge net host` first.')
+    const { agent, member: handle } = splitAddress(to)
+    if (handle === net.self) return this.send({ ...req, to: agent }, conn)
+    const holder = this.peers.get(req.from)
+    if (!holder || !this.holds(req.from, req.sessions)) {
+      return this.fail(conn, 'Sends to another user\'s agent need a checked sender. Run `agent-bridge send --as <your name>` from inside your agent session.')
+    }
+    if (!holder.shared) return this.fail(conn, `"${req.from}" is not shared on the network, so it cannot get replies. Run \`agent-bridge net share\` from its session first.`)
+    const size = Buffer.byteLength(req.text)
+    if (size > MAX_REMOTE_TEXT) return this.fail(conn, `The message is ${size} bytes. Messages to another user's agent are limited to ${MAX_REMOTE_TEXT}. Send less, or split it.`)
+    const member = net.members.find(m => m.handle === handle)
+    if (!member) {
+      const known = net.members.map(m => m.handle).join(', ') || 'none yet'
+      return this.fail(conn, `No member "${handle}" on network "${net.network}". Members: ${known}.`)
+    }
+    if (member.blocked) {
+      return this.fail(conn, `${handle}'s key changed. ${verifyHint(handle)} Or accept it unverified: \`agent-bridge net trust ${handle}\`.`)
+    }
+    if (!member.peers.some(p => p.name === agent)) {
+      const shared = member.peers.map(p => `${p.name}@${handle}`).join(', ')
+      return this.fail(conn, `"${agent}" is not shared by ${handle}. ${shared ? `Shared by ${handle}: ${shared}.` : `${handle} shares nothing yet.`}`)
+    }
+    const msg: Message = { id: this.deps.newId(), from: req.from, to, text: req.text, ts: this.deps.now().toISOString(), verified: true }
+    const q = this.queue(to)
+    q.push(msg)
+    this.deps.store.saveQueue(to, q)
+    this.pumpRemote(to)
+    const pushed = this.remoteInflight.get(to) === msg.id
+    this.reply(conn, { type: 'sent', to, id: msg.id, live: false, pushed, queued: q.length, listening: [], via: 'network', keyVerified: member.keyVerified })
+  }
+
+  private pumpRemote(key: string): void {
+    const head = this.queue(key)[0]
+    const link = this.link
+    if (!head || !link || link.closed || this.remoteInflight.has(key)) return
+    this.remoteInflight.set(key, head.id)
+    link.send({ type: 'msg', msg: head })
+  }
+
+  /** Only the session holding the name may share it. */
+  private share(name: string, sessions: string[], on: boolean): string | undefined {
+    const peer = this.peers.get(name)
+    if (!peer || !this.holds(name, sessions)) return `"${name}" is not this session's name. Share your own name; \`agent-bridge whoami\` prints it.`
+    if (Boolean(peer.shared) === on) return undefined
+    if (on) peer.shared = true
+    else delete peer.shared
+    this.savePeers()
+    this.netChanged()
+    return undefined
+  }
+
+  private remotePeers(): RemotePeer[] {
+    return (this.net?.members ?? []).flatMap(m =>
+      m.peers.map(p => ({ address: `${p.name}@${m.handle}`, member: m.handle, kind: p.kind, online: p.online, keyVerified: m.keyVerified, blocked: m.blocked })),
+    )
+  }
+
+  private networkStatus(net: NetView): NetworkStatus {
+    let outbox = 0
+    for (const [key, q] of this.queues) if (isOutboxKey(key)) outbox += q.length
+    return { name: net.network, self: net.self, connected: net.connected, outbox }
+  }
+
+  private netChanged(): void {
+    this.deps.net?.changed()
   }
 
   /** The one online peer of `kind`, other than the sender, that joined from `folder`. None or several: why. */
@@ -530,13 +758,18 @@ export class Hub {
     if (!peer) return
     if (peer.session) peer.lastSession = peer.session
     peer.session = null
+    const wasShared = this.unshare(peer)
     this.savePeers()
     for (const w of [...this.waitersOf(name)]) this.evict(w, { type: 'stopped' })
+    if (wasShared) this.netChanged()
   }
 
   private bind(peer: Peer, session: string): void {
     peer.session = session
+    // Exposure belongs to the session that chose it. A takeover or a new session starts unshared.
+    const wasShared = this.unshare(peer)
     this.savePeers()
+    if (wasShared) this.netChanged()
     for (const w of [...this.waitersOf(peer.name)]) {
       if (w.session === session) continue
       // Let a waiter finish the message it holds. ack evicts it.
@@ -547,6 +780,7 @@ export class Hub {
   }
 
   private pump(name: string): void {
+    if (isOutboxKey(name)) return this.pumpRemote(name)
     const peer = this.peers.get(name)
     const head = this.queue(name)[0]
     if (!peer || !head || this.inflight.has(name)) return
@@ -561,6 +795,7 @@ export class Hub {
     this.waiters.set(waiter.name, this.waitersOf(waiter.name).filter(w => w !== waiter))
     this.byConn.delete(waiter.conn)
     if (this.inflight.get(waiter.name)?.waiter === waiter) this.inflight.delete(waiter.name)
+    if (this.peers.get(waiter.name)?.shared) this.netChanged()
   }
 
   /** Tells a waiter why it is done and closes it. */
@@ -616,9 +851,19 @@ export class Hub {
       this.savedSeen.delete(p.name)
       this.deps.store.dropQueue(p.name)
       if (queued) this.deps.log?.(`pruned ${p.name}: idle ${Math.round(idle / 3600_000)}h, dropped ${queued} queued message(s).`)
+      if (p.shared) this.netChanged()
       dropped = true
     }
     if (dropped) this.savePeers()
+    // An outbox message nobody could deliver for a week goes too.
+    for (const [key, q] of [...this.queues]) {
+      const head = q[0]
+      if (!isOutboxKey(key) || !head || now - Date.parse(head.ts) <= PRUNE_QUEUED_AFTER_MS) continue
+      if (this.remoteInflight.has(key)) continue
+      this.queues.delete(key)
+      this.deps.store.dropQueue(key)
+      this.deps.log?.(`pruned outbox ${key}: undelivered for a week, dropped ${q.length} message(s).`)
+    }
   }
 
   private addPeer(name: string, kind: PeerKind, session: string | null = null): Peer {
@@ -637,6 +882,19 @@ export class Hub {
     this.dirty = false
     for (const p of this.peers.values()) this.savedSeen.set(p.name, this.seenAt(p))
     this.deps.store.savePeers([...this.peers.values()])
+  }
+
+  /** True if one of `sessions` holds `name`. No sessions: an unchecked sender, so false. */
+  private holds(name: string, sessions: string[] | undefined): boolean {
+    const session = this.peers.get(name)?.session
+    return session != null && (sessions?.includes(session) ?? false)
+  }
+
+  /** Clears `shared`. True if it was set, so the caller tells the network. */
+  private unshare(peer: Peer): boolean {
+    const was = peer.shared === true
+    delete peer.shared
+    return was
   }
 
   private queue(name: string): Message[] {

@@ -65,4 +65,25 @@ describe('opencode plugin', () => {
     await send?.execute({ to_kind: 'claude', text: 'hi' }, toolCtx)
     expect(execs[2]).toEqual(['send', '--as', 'proj-opencode', '--to-kind', 'claude', 'hi'])
   })
+
+  it('shares and unshares the joined name with the session id, and refuses before join', async () => {
+    const execs: { args: string[]; env: NodeJS.ProcessEnv }[] = []
+    const exec: Exec = async (args, env) => {
+      execs.push({ args, env })
+      return args[0] === 'join' ? 'Joined agent-bridge as "proj-opencode".' : 'ok'
+    }
+    const spawn: Spawn = () => ({ stdout: new PassThrough(), kill: () => {} })
+    const f = fakeCtx()
+    await createPlugin({ exec, spawn }).setup(f.ctx)
+    const share = f.tools.find(t => t.name === 'bridge_share')
+    await expect(share?.execute({ on: true }, toolCtx)).rejects.toThrow(/join first/)
+    await f.tools.find(t => t.name === 'bridge_join')?.execute({}, toolCtx)
+    await share?.execute({ on: true }, toolCtx)
+    await share?.execute({ on: false }, toolCtx)
+    expect(execs.slice(1).map(e => e.args)).toEqual([
+      ['net', 'share', 'proj-opencode'],
+      ['net', 'unshare', 'proj-opencode'],
+    ])
+    expect(execs[1]?.env['OPENCODE_SESSION_ID']).toBe('ses_1')
+  })
 })

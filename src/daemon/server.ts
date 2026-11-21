@@ -5,7 +5,9 @@ import { z } from 'zod'
 import { ADAPTERS } from '../adapters/index.js'
 import { Hub, type Conn } from './hub.js'
 import { acquireLock } from './lock.js'
+import { toError } from '../lib/errors.js'
 import { logger } from '../lib/log.js'
+import type { NetService } from '../net/service.js'
 import { DAEMON_LOCK, ensureHome, SOCK } from '../paths.js'
 import { Request, type Reply } from '../schema.js'
 import { fileStore } from './store.js'
@@ -29,8 +31,11 @@ export function runDaemon(): void {
     log('another daemon holds the lock. Exiting.')
     return
   }
+  // Built after the hub, which tells it when shared agents change.
+  let netService: NetService | undefined
   const hub = new Hub({ store: fileStore(), now: () => new Date(), newId: () => randomUUID().slice(0, 8), pid: process.pid,
     log,
+    net: { changed: () => netService?.changed() },
     probe: kind => ADAPTERS[kind].alive,
     deliver: async (kind, endpoint, msg) => {
       const deliver = ADAPTERS[kind].deliver
@@ -39,10 +44,24 @@ export function runDaemon(): void {
     },
   })
 
-  const exit = (): never => {
-    fs.rmSync(SOCK, { force: true })
-    fs.rmSync(DAEMON_LOCK, { force: true })
-    process.exit(0)
+  const netReady = (async (): Promise<NetService> => {
+    const { NetService } = await import('../net/service.js')
+    netService = new NetService(hub, logger('net', { timestamps: true }))
+    await netService.start()
+    return netService
+  })()
+  // A failed load must not take the local bridge down. `net` commands then report the error.
+  netReady.catch((err: unknown) => log(`network service failed to load: ${toError(err).message}`))
+
+  const exit = (): void => {
+    const done = (): never => {
+      fs.rmSync(SOCK, { force: true })
+      fs.rmSync(DAEMON_LOCK, { force: true })
+      process.exit(0)
+    }
+    // Close the network server so the port is free for the next daemon. Never wait on it for long.
+    setTimeout(done, 1000).unref()
+    void (netService?.stop() ?? Promise.resolve()).then(done, done)
   }
 
   const server = net.createServer(sock => {
@@ -62,6 +81,16 @@ export function runDaemon(): void {
           conn.send({ type: 'ok' })
           conn.end()
           return void setTimeout(exit, 50)
+        }
+        if (parsed.data.op === 'net') {
+          const { cmd, sessions = [] } = parsed.data
+          return void netReady
+            .then(service => service.handle(cmd, sessions))
+            .then(
+              r => conn.send({ type: 'net', text: r.text, ...(r.info ? { info: r.info } : {}) }),
+              (err: unknown) => conn.send({ type: 'error', message: toError(err).message }),
+            )
+            .finally(() => conn.end())
         }
         hub.handle(parsed.data, conn)
       },

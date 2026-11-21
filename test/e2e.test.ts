@@ -3,41 +3,17 @@ import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import { onLines } from '../src/lib/wire.js'
 import { sessionTag } from '../src/names.js'
+import { CLI, home, REPO, until } from './harness.js'
 
-// End-to-end: real daemon, real sockets, built CLI. Unix socket paths cap near 104 bytes, so keep HOME short.
-const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
-const CLI = path.join(REPO, 'dist', 'cli.js')
-const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'ab-'))
-// Strip the real agent sessions this suite may run inside, so no test ever pushes into a live Claude or agy session.
-const inherited = Object.fromEntries(
-  Object.entries(process.env).filter(([k]) => !k.startsWith('CLAUDE_CODE_') && !k.startsWith('ANTIGRAVITY_')),
-)
-const env = { ...inherited, AGENT_BRIDGE_HOME: HOME }
+// End-to-end: real daemon, real sockets, built CLI, in one throwaway home.
+const H = home('e2e')
+const HOME = H.dir
+const { env, run, start } = H
+/** MCP servers started here; the home's own `start` tracks the rest. */
 const procs: ChildProcessWithoutNullStreams[] = []
-
-interface Proc {
-  p: ChildProcessWithoutNullStreams
-  out: () => string
-  exited: () => Promise<number | null>
-}
-
-const run = (args: string[], extra: Record<string, string> = {}, input?: string): string =>
-  execFileSync(process.execPath, [CLI, ...args], { env: { ...env, ...extra }, encoding: 'utf8', ...(input === undefined ? {} : { input }) })
-
-function start(args: string[], extra: Record<string, string> = {}): Proc {
-  const p = spawn(process.execPath, [CLI, ...args], { env: { ...env, ...extra } })
-  procs.push(p)
-  let out = ''
-  p.stdout.on('data', (d: Buffer) => {
-    out += d.toString()
-  })
-  const exit = new Promise<number | null>(r => p.on('exit', r))
-  return { p, out: () => out, exited: () => (p.exitCode !== null ? Promise.resolve(p.exitCode) : exit) }
-}
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
@@ -47,22 +23,10 @@ interface StatusPeer {
   session: string | null
   online: boolean
   queued: number
+  shared?: boolean
 }
 const status = (): { pid: number; peers: StatusPeer[] } => JSON.parse(run(['status'])) as { pid: number; peers: StatusPeer[] }
 const peer = (name: string): StatusPeer | undefined => status().peers.find(p => p.name === name)
-/** Polls until `check` passes. Fixed sleeps flake when process startup is slow. */
-async function until(check: () => boolean, what: string, timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    try {
-      if (check()) return
-    } catch {
-      // not ready yet
-    }
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
-    await sleep(50)
-  }
-}
 const online = (name: string, session?: string) =>
   until(() => {
     const p = peer(name)
@@ -121,13 +85,7 @@ const channelTexts = (rpc: Rpc): unknown[] =>
 
 afterAll(async () => {
   for (const p of procs) p.kill()
-  try {
-    run(['restart'])
-  } catch {
-    // daemon already gone
-  }
-  await sleep(100)
-  fs.rmSync(HOME, { recursive: true, force: true })
+  await H.dispose()
 })
 
 describe('agy listener', () => {
@@ -610,5 +568,26 @@ describe('install', () => {
     expect(calls()).toContain('plugin uninstall agent-bridge@agent-bridge')
     expect(calls()).toContain('plugin marketplace remove agent-bridge')
     expect(fs.existsSync(ocPlugin)).toBe(false)
+  })
+})
+
+describe('network sharing', () => {
+  const senv = { CLAUDE_CODE_SESSION_ID: 'net-share-1' }
+
+  it('shares and unshares this session, and refuses a remote send without a network', () => {
+    run(['join', '--kind', 'claude', '--no-push', 'net-coder'], senv)
+    expect(run(['net', 'share'], senv)).toMatch(/"net-coder" is shared\. There is no network yet/)
+    expect(status().peers.find(p => p.name === 'net-coder')).toMatchObject({ shared: true })
+    expect(() => run(['send', '--as', 'net-coder', 'planner@bob', 'hi'], senv)).toThrow(/No network/)
+    expect(run(['net', 'unshare'], senv)).toMatch(/no longer shared/)
+    expect(status().peers.find(p => p.name === 'net-coder')?.shared).toBeUndefined()
+  })
+
+  it('refuses to share a name another session holds', () => {
+    expect(() => run(['net', 'share', 'net-coder'], { CLAUDE_CODE_SESSION_ID: 'net-mallory' })).toThrow(/not this session's name/)
+  })
+
+  it('refuses to share from a plain shell', () => {
+    expect(() => run(['net', 'share', 'net-coder'])).toThrow(/No agent session id/)
   })
 })
