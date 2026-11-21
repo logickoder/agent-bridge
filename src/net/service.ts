@@ -5,7 +5,7 @@ import { NET_HTTP_SOCK } from '../paths.js'
 import type { NetCommand, NetInfo } from '../schema.js'
 import { assertSupported, b64u, fingerprint } from './crypto.js'
 import { verifyDirectory } from './directory.js'
-import { formatStatus, keyChoiceRefused, raiseRefused, TRIAL_NOTE, VERIFY_HINT } from './format.js'
+import { formatStatus, keyChoiceRefused, raiseRefused, TRIAL_NOTE, VERIFY_HINT, verifyRefused } from './format.js'
 import type { StaticKeys } from './handshake.js'
 import { startNetServer, type NetServer } from './http-server.js'
 import { decodeInvite, encodeInvite, urlProblem } from './invite.js'
@@ -109,7 +109,7 @@ export class NetService {
       case 'fingerprint':
         return { text: `Your fingerprint: ${this.ownFingerprint()}\nRead it to each member over a call or a separate chat. A code sent through the bridge proves nothing.` }
       case 'verify': {
-        if (sessions.length && this.keyChanged(cmd.handle)) throw new Error(keyChoiceRefused(cmd.handle, `verify ${cmd.handle} <code>`))
+        if (sessions.length) throw new Error(verifyRefused(cmd.handle))
         const r = this.member().verify(cmd.handle, cmd.code)
         if (!r.ok) throw new Error(r.text)
         return { text: r.text }
@@ -366,10 +366,6 @@ export class NetService {
       link.run().catch((err: unknown) => this.log(`network link stopped: ${toError(err).message}`))
     }
     return link
-  }
-
-  private keyChanged(handle: string): boolean {
-    return this.link?.members().some(m => m.handle === handle && m.changed) ?? false
   }
 
   /** Before a new network: anything an earlier one left (a removed member's files, its outbox) goes. */

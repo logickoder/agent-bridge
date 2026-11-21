@@ -15,6 +15,13 @@ export const raiseRefused = (handle: string, level: string): string =>
 export const keyChoiceRefused = (handle: string, command: string): string =>
   `An agent session cannot accept ${handle}'s changed key. A key swapped by someone in the middle looks exactly like a new one, so only you decide. Check the code with ${handle} yourself, then run \`agent-bridge net ${command}\` in your own terminal.`
 
+/**
+ * Why an agent session cannot mark a key verified. A host in the middle can hand out its own key from the start,
+ * and `net status` prints that key's code, so an agent could copy it into `net verify`.
+ */
+export const verifyRefused = (handle: string): string =>
+  `An agent session cannot mark ${handle}'s key verified. Someone in the middle can hand out their own key, and \`net status\` prints its code, so only you decide. Check the code with ${handle} yourself, then run \`agent-bridge net verify ${handle} <code>\` in your own terminal.`
+
 export const VERIFY_HINT =
   'Compare fingerprints with each member over a call or a separate chat, never through the bridge, then run `agent-bridge net verify <handle> <code>`. Until you do, the host could read your messages.'
 

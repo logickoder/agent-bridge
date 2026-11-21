@@ -3,7 +3,7 @@ import { request } from '../client/index.js'
 import { peerName, takeFlag, takeSwitch } from '../lib/args.js'
 import { readStdin } from '../lib/wire.js'
 import { sessionTag } from '../names.js'
-import { formatAgentLevels, keyChoiceRefused, raiseRefused } from './format.js'
+import { formatAgentLevels, keyChoiceRefused, raiseRefused, verifyRefused } from './format.js'
 import { AllowLevel, MAX_PEER_NAME, PeerName, type NetCommand } from '../schema.js'
 
 /** What `net` needs from the core CLI: this shell's agent session ids, and where to print. */
@@ -79,24 +79,20 @@ async function confirmTyped(want: string, question: string, what: string, rerun:
 const confirmRaise = (handle: string, level: string, ctx: NetCliContext): Promise<void> =>
   confirmTyped(`${handle} ${level}`, `Raising ${handle} to ${level} lets their agents act here without asking you.`, 'Raising a level', `allow ${handle} ${level}`, ctx)
 
-/** True if the daemon holds a changed, undecided key for `handle`. */
-async function keyChanged(handle: string): Promise<boolean> {
-  const r = await request({ op: 'net', cmd: { cmd: 'status' } }, 'net')
-  return r.info?.members.some(m => m.handle === handle && m.changed) ?? false
-}
 
 /**
- * Accepting a changed key (trust, or verify while the key is changed) asks the person at the terminal, like a
- * level raise: an agent talked into it could copy the code `net status` prints into `net verify`.
+ * Deciding on a key (verify, or trust a changed one) asks the person at the terminal, like a level raise: an agent
+ * talked into it could copy the code `net status` prints into `net verify`, and a host in the middle can hand out
+ * its own key from the start.
  */
 async function confirmKeyChoice(cmd: NetCommand, sessions: string[], ctx: NetCliContext): Promise<void> {
   if (cmd.cmd === 'trust') {
     if (sessions.length) throw new Error(keyChoiceRefused(cmd.handle, `trust ${cmd.handle}`))
     return confirmTyped(`trust ${cmd.handle}`, `Trusting ${cmd.handle}'s new key without checking it lets whoever holds it read and send as ${cmd.handle}.`, 'Trusting a key', `trust ${cmd.handle}`, ctx)
   }
-  if (cmd.cmd !== 'verify' || !(await keyChanged(cmd.handle))) return
-  if (sessions.length) throw new Error(keyChoiceRefused(cmd.handle, `verify ${cmd.handle} <code>`))
-  return confirmTyped(`verify ${cmd.handle}`, `${cmd.handle}'s key changed. Accept the new one only if ${cmd.handle} read you this code themselves.`, 'Verifying a changed key', `verify ${cmd.handle} ${cmd.code}`, ctx)
+  if (cmd.cmd !== 'verify') return
+  if (sessions.length) throw new Error(verifyRefused(cmd.handle))
+  return confirmTyped(`verify ${cmd.handle}`, `Mark ${cmd.handle}'s key verified only if ${cmd.handle} read you this code themselves, by call or a separate chat.`, 'Verifying a key', `verify ${cmd.handle} ${cmd.code}`, ctx)
 }
 
 /** A handle from the login name, if it makes a valid one. The host may still pick another. */

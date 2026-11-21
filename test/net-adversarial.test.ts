@@ -205,7 +205,7 @@ describe('network under attack and failure', { timeout: 60_000 }, () => {
     expect(H.fail(['send', '--as', H_AGENT, `${A_AGENT}@bob`, 'x'], h.env)).toMatch(/bob's key changed/)
     // Accepting a changed key is the user's call: never from an agent session, and only on a terminal.
     expect(H.fail(['net', 'trust', 'bob'], h.env)).toMatch(/An agent session cannot accept bob's changed key/)
-    expect(H.fail(['net', 'verify', 'bob', 'AAAA'], h.env)).toMatch(/An agent session cannot accept bob's changed key/)
+    expect(H.fail(['net', 'verify', 'bob', 'AAAA'], h.env)).toMatch(/An agent session cannot mark bob's key verified/)
     expect(await socketRequest(H, { op: 'net', cmd: { cmd: 'trust', handle: 'bob' }, sessions: ['s'] })).toMatch(/cannot accept bob's changed key/)
     expect(H.fail(['net', 'trust', 'bob'])).toMatch(/Trusting a key needs your terminal/)
     expect(H.tty(['net', 'trust', 'bob'], 'trust bob\n')).toMatch(/It is not verified/)
@@ -238,7 +238,7 @@ describe('network under attack and failure', { timeout: 60_000 }, () => {
     homes.push(M)
     expect(M.run(['net', 'connect', invite, '--handle', 'dave'])).toMatch(/as dave/)
     expect(M.run(['net', 'status'])).toMatch(/bob +(online|offline) +unverified/)
-    expect(M.fail(['net', 'verify', 'bob', realBob])).toMatch(/possibly the host, may be intercepting/)
+    expect(M.ttyFail(['net', 'verify', 'bob', realBob], 'verify bob\n')).toMatch(/possibly the host, may be intercepting/)
     expect(M.run(['net', 'status'])).toMatch(/bob +(online|offline) +unverified/)
   })
 })

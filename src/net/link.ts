@@ -73,6 +73,29 @@ export interface LinkDeps {
 
 const POLL_WAIT_MS = 25_000
 const SEEN_MS = 8 * 24 * 3600_000
+/**
+ * Oldest message accepted, by the sender's own timestamp. Below SEEN_MS, so any message old enough to have left
+ * the replay record is refused for its age: a host cannot hold mail back and deliver it again after 8 days.
+ */
+export const MAX_MESSAGE_AGE_MS = 7 * 24 * 3600_000
+/** How far ahead of this clock a sender's timestamp may be. */
+const MAX_CLOCK_AHEAD_MS = 3600_000
+/** Unopened mail kept per member while its key is undecided. Older mail goes first. */
+export const MAX_HELD_PER_MEMBER = 200
+
+/** True if a message sent at `sentAt` is too old, too far in the future, or unreadable, as seen at `nowMs`. */
+export function outsideReplayWindow(sentAt: string, nowMs: number): boolean {
+  const at = Date.parse(sentAt)
+  return !Number.isFinite(at) || nowMs - at > MAX_MESSAGE_AGE_MS || at - nowMs > MAX_CLOCK_AHEAD_MS
+}
+
+/** Adds `entry` to held mail, dropping its sender's oldest when that sender is at the cap. The count dropped. */
+export function holdCapped(held: MailEntry[], entry: MailEntry, max = MAX_HELD_PER_MEMBER): { held: MailEntry[]; dropped: number } {
+  const mine = held.filter(e => e.from === entry.from)
+  const dropped = Math.max(0, mine.length + 1 - max)
+  const gone = new Set(mine.slice(0, dropped))
+  return { held: [...held.filter(e => !gone.has(e)), entry], dropped }
+}
 const BACKOFF_MIN_MS = 500
 const BACKOFF_MAX_MS = 30_000
 const PRESENCE_DEBOUNCE_MS = 1000
@@ -417,8 +440,11 @@ export class Link {
       return
     }
     if (pin.changed) {
-      // Opened only once the user trusts or verifies the new key. Kept, not dropped.
-      this.state.held.push(entry)
+      // Opened only once the user trusts or verifies the new key. Kept, up to a cap per member, so whoever holds
+      // the new key cannot grow this file without bound while the user decides.
+      const r = holdCapped(this.state.held, entry)
+      this.state.held = r.held
+      if (r.dropped) this.deps.log?.(`dropped ${r.dropped} held message(s) from ${entry.from}: over ${MAX_HELD_PER_MEMBER} wait for a key decision`)
       return
     }
     const seenKey = `${entry.from}:${entry.env.id}`
@@ -464,6 +490,10 @@ export class Link {
         return this.deps.hub.notify(sent.from, `Your message to ${sent.agent}@${member} was not delivered: ${BOUNCE_TEXT[inner.reason](sent.agent)}`)
       }
       case 'msg': {
+        if (outsideReplayWindow(inner.sentAt, this.deps.now().getTime())) {
+          this.deps.log?.(`dropped a message from ${member}: sent ${inner.sentAt}, outside the ${MAX_MESSAGE_AGE_MS / 86_400_000}-day window (a replay, or a clock far off)`)
+          return
+        }
         const r = this.deps.hub.inbound({
           fromAgent: inner.from,
           member,

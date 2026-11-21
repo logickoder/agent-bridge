@@ -6,9 +6,9 @@ import type { Channel } from './channel.js'
 import { b64u, dh, fingerprint, generateEd25519, generateX25519 } from './crypto.js'
 import { signDirectory } from './directory.js'
 import { buildJoin, buildOpen, channelFor, memberBinding, openJoinReply, type StaticKeys } from './handshake.js'
-import { allowLevel, Link, normalizeCode, type Transport } from './link.js'
+import { allowLevel, holdCapped, Link, MAX_MESSAGE_AGE_MS, normalizeCode, outsideReplayWindow, type Transport } from './link.js'
 import { newHostState, Relay, RPC_REPLY_PATH, type RelayStore } from './relay.js'
-import { RpcReply, type HostState, type LinkState, type Mailbox, type RpcOp } from './schema.js'
+import { RpcReply, type HostState, type LinkState, type Mailbox, type MailEntry, type RpcOp } from './schema.js'
 import { sealEnvelope } from './envelope.js'
 import { LocalTransport } from './transport-local.js'
 import { PollWaits } from './waits.js'
@@ -572,5 +572,30 @@ describe('allowLevel', () => {
     expect(allowLevel(scoped, 0, 'planner')).toBe('work')
     expect(allowLevel(scoped, 0, 'coder')).toBe('ask')
     expect(allowLevel(pin, 0, 'coder')).toBe('chat')
+  })
+})
+
+describe('outsideReplayWindow', () => {
+  const now = Date.parse('2026-11-21T12:00:00Z')
+  it('accepts a message within the window', () => expect(outsideReplayWindow(new Date(now - MAX_MESSAGE_AGE_MS + 1000).toISOString(), now)).toBe(false))
+  it('refuses one older than the window, so a replay past the seen record fails', () => {
+    expect(outsideReplayWindow(new Date(now - MAX_MESSAGE_AGE_MS - 1000).toISOString(), now)).toBe(true)
+  })
+  it('refuses one stamped far in the future, and an unreadable stamp', () => {
+    expect(outsideReplayWindow(new Date(now + 2 * 3600_000).toISOString(), now)).toBe(true)
+    expect(outsideReplayWindow('not a date', now)).toBe(true)
+  })
+})
+
+describe('holdCapped', () => {
+  const entry = (from: string, seq: number): MailEntry => ({ seq, from, t: 'msg', env: { v: 1, id: 'a'.repeat(22), e: 'b'.repeat(43), c: 'c' }, at: '2026-11-21T12:00:00.000Z' })
+  it('keeps everything under the cap', () => {
+    const r = holdCapped([entry('bob', 1)], entry('bob', 2), 3)
+    expect(r).toEqual({ held: [entry('bob', 1), entry('bob', 2)], dropped: 0 })
+  })
+  it('drops the sender\'s oldest at the cap, and never another member\'s mail', () => {
+    const r = holdCapped([entry('bob', 1), entry('carol', 1), entry('bob', 2)], entry('bob', 3), 2)
+    expect(r.dropped).toBe(1)
+    expect(r.held.map(e => `${e.from}${e.seq}`)).toEqual(['carol1', 'bob2', 'bob3'])
   })
 })
