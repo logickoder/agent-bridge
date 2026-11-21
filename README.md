@@ -17,6 +17,18 @@ Then join from each session: `/bridge` in Claude Code or Antigravity, or ask ope
 
 Requires Node 22+ (and pnpm to build from source).
 
+### Across machines
+
+Sessions on other machines, other people's included, can join through a network that one member hosts on their own machine, behind a tunnel they choose. Nothing passes through a server run by agent-bridge.
+
+```sh
+agent-bridge net host --public-url https://bridge.example.com --socket   # host, behind your own tunnel
+agent-bridge net invite                                                   # a single-use invite for one person
+agent-bridge net connect -                                                # the guest pastes it
+```
+
+Then `/bridge share` in each session others may reach, and compare fingerprints with each member by call (`agent-bridge net verify <handle> <code>`). Messages are end-to-end encrypted between members; the host cannot read them once fingerprints are compared. To try it without a tunnel of your own: `agent-bridge net host --tunnel cloudflared`. Setup: [docs/install.md](docs/install.md#networks). Trust, levels and limits: [docs/concepts.md](docs/concepts.md#networks).
+
 ## How it works
 
 ![Three idle agent sessions, Claude Code, Antigravity and opencode, each woken by the agent-bridge daemon through its own interface: inbox socket, agentapi send-message, plugin session.prompt.](docs/assets/how-it-works.svg)
@@ -45,6 +57,7 @@ Delivery is at least once: a message leaves the queue only when it is acked. Sen
 | `agent-bridge status` | Everything, as JSON. Session ids show as tags |
 | `agent-bridge restart` | Stop the daemon. The next client starts it |
 | `agent-bridge claude [--as name] [claude args]` | Launch Claude Code with a channel instead of the socket |
+| `agent-bridge net <sub>` | Networks across machines: `host`, `invite`, `connect`, `status`, `fingerprint`, `verify`, `trust`, `allow`, `share`, `kick`, `set-url`, `leave`, `stop`. `agent-bridge net` lists them |
 
 Agent-side commands, called by skills, hooks and plugins: `listen`, `agy-hook`, `monitor`, `claude-guard`, `opencode-stream`, `mcp <kind>`, `daemon`. `agent-bridge` with no arguments lists them all.
 
@@ -61,8 +74,8 @@ Layout and conventions: [AGENTS.md](AGENTS.md).
 
 ## Docs
 
-- [concepts.md](docs/concepts.md): names, binding, delivery, sender check
-- [install.md](docs/install.md): what install changes, environment overrides
+- [concepts.md](docs/concepts.md): names, binding, delivery, sender check, networks and their trust model
+- [install.md](docs/install.md): what install changes, environment overrides, hosting a network
 - [agents/](docs/agents/): Claude Code, Antigravity, opencode, with findings
 - [decisions.md](docs/decisions.md): why it works this way, superseded and rejected approaches
 - [adding-an-agent.md](docs/adding-an-agent.md): the adapter checklist, and researched next adapters (Codex, Gemini CLI, Cursor)
@@ -74,6 +87,7 @@ Layout and conventions: [AGENTS.md](AGENTS.md).
 - Adapters exist for Claude Code, Antigravity and opencode. opencode's v2 plugin API is beta, and Antigravity's `agentapi` and Claude's socket line format are undocumented, so each keeps a fallback.
 - The opt-in channel path shows a development-channel notice at every launch.
 - The sender check is not a security boundary between processes of the same user.
+- Networks: until members compare fingerprints, a dishonest host could read their messages. Member levels are guidance the receiving agent follows, not enforcement; the agent's own permission settings are the hard limit.
 
 ## License
 
