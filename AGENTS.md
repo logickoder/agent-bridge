@@ -18,7 +18,8 @@
 | `src/mcp/identity.ts` | Server name and version. Tiny, so adapter indexes can import it |
 | `src/mcp/server.ts` | Minimal MCP stdio server and `defineTool` (zod args to JSON schema) |
 | `src/mcp/tools.ts` | The `send` and `peers` tools, shared by every agent kind |
-| `src/lib/` | Generic helpers, no bridge logic: `errors` (errno codes, `toError`, `isDaemonDown`), `json-file` (validated read, atomic write), `log` (tagged stderr), `wire` (JSON lines), `args`, `config` (other tools' config and PATH links) |
+| `src/net/` | Networks across machines. Pure: `crypto`, `channel`, `envelope`, `invite`, `handshake`, `directory`, `url-update`, `relay` (host state machine), `link` (a member's side), `format`, `schema`. I/O: `store` (files under `net/`, 0600), `http-server`, `transport-http`, `transport-local` (the host's own member), `keeper` (holds the port, relays to the daemon's socket, runs a trial cloudflared), `service` (daemon wiring, answers `op: 'net'`), `cli` (`agent-bridge net`) |
+| `src/lib/` | Generic helpers, no bridge logic: `errors` (errno codes, `toError`, `isDaemonDown`), `json-file` (validated read, atomic write, `readJsonDir`), `log` (tagged stderr), `wire` (JSON lines), `args`, `config` (other tools' config and PATH links), `rate` (token bucket), `tty` (ask on a terminal; undefined without one) |
 | `src/adapters/types.ts` | The `Adapter` interface every agent kind implements |
 | `src/adapters/index.ts` | `ADAPTERS` registry, typed `Record<PeerKind, Adapter>` |
 | `src/adapters/<kind>/` | Everything agent-specific. `index.ts` exports the adapter and is the folder's only entry point. The rest is split by concern: `mcp.ts`, `install.ts`, `names.ts` (constants), and the wake path (`agy/push.ts`, `agy/listen.ts`, `agy/hook.ts`, `agy/format.ts`, `claude/socket.ts`, `claude/monitor.ts`, `claude/format.ts`, `claude/channel/`) |
@@ -26,7 +27,7 @@
 | `src/adapters/opencode/plugin/` | The opencode plugin. Standalone (node built-ins only): install copies the built file into opencode's plugins folder |
 | `src/adapters/claude/plugin/` | The Claude plugin: `/bridge` (socket) and `/bridge-monitor` skills sharing `shared/peer-messages.md`, the monitor, and the bypass-guard hook. Registered by install through the repo's `.claude-plugin/marketplace.json` |
 | `docs/` | User docs (`concepts.md`, `install.md`, `agents/`) and the design record (`decisions.md`, `live-tests.md`, `adding-an-agent.md`, `open-questions.md`). Agent findings live in `docs/agents/<agent>.md`; never name a file there `claude.md`, macOS loads it as `CLAUDE.md` |
-| `test/` | Tests that touch real files, sockets or processes. `e2e.test.ts` runs against `dist/cli.js` |
+| `test/` | Tests that touch real files, sockets or processes. `e2e.test.ts` runs against `dist/cli.js`. `net*.test.ts` run several homes as separate users through `harness.ts` (homes, `until`, `socketRequest`, `tty` on a pseudo-terminal), with `proxy.ts` (a recording, tampering stand-in for the tunnel) |
 
 ## Rules
 

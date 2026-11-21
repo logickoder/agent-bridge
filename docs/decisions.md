@@ -57,6 +57,38 @@ Why the bridge works the way it does. Findings referenced here live in [agents/]
 | Check senders by session, fence message text | Anyone local could send under any name, and text could fake a bridge header. Unchecked sends are labeled; bodies are fenced and header-like lines escaped |
 | No per-session send keys | A key file found from the session id is found just as easily by a spoofer who sets that id. Instead `status` shows tags and the docs say the check is not a security boundary |
 
+## Networks
+
+How bridges on different machines and users link. Code in `src/net/`. Trust model in [concepts.md](concepts.md#networks).
+
+| Decision | Why |
+|---|---|
+| One member hosts; a star through its daemon | Nothing passes through a server agent-bridge runs. Guests only connect outward, so only the host needs a tunnel |
+| Bring your own tunnel (`--public-url`); `--tunnel cloudflared` as a trial only | Any tunnel with a fixed address works. Cloudflare calls quick tunnels testing-only, with no uptime guarantee and 200 open requests at most, and their address changes on every restart. The keeper runs cloudflared, so a daemon restart adopts it and keeps the address. It stops the tunnel after the daemon has been gone a minute, freeing the port only after cloudflared exits. Quick tunnels cannot forward to a socket file (tested), so trial mode uses a port. "Trial" shows in host, status and invite output |
+| The daemon listens on a private socket file; a keeper process holds the port | A tunnel must never forward to a port another program could take, and the daemon comes and goes. The keeper outlives it, relays to `net/http.sock` (0600), answers 503 while the daemon is down, and holds the port until `net stop`. `--socket` skips the port for tunnels and proxies that can forward to a Unix socket, which also covers reboots |
+| HTTP long-poll, 25s holds, no SSE or WebSocket | Quick tunnels do not carry SSE. One code path works through every tunnel. Each guest holds one request |
+| Two crypto layers on node:crypto, no new dependency | Outer channel: X25519 static-static plus random ids from both sides through HKDF, chacha20-poly1305 with a direction and counter nonce, a 1024-wide replay window, AAD binding session, path and counter. The tunnel sees ids, sizes and timing only. Inner envelope: ephemeral plus static X25519 per message, padded to fixed sizes. The host routes by member handle and stores ciphertext |
+| Agent names and peer lists travel inside envelopes | The host never learns which agents exist. Presence is an envelope like any message |
+| Keys pinned on first sight, `unverified` until `net verify` | The host signs the member list, which proves only that the host sent it. A dishonest host can hand out its own key in place of a member's, so the promise is worded as "the host cannot read your messages once you have compared fingerprints". Codes are compared out of band; the skills tell agents never to trust a code that arrived over the bridge |
+| A changed key blocks both directions | Mail from the member is held, sends are refused, until `net trust` or `net verify`. Trust leaves the key unverified |
+| Invites are data, parsed by the CLI, read from stdin | An agent never opens the address inside one. The token is single use, 24h, stored as a hash. The URL policy is https, or http on loopback only |
+| Remote messages carry `origin` and a caution | Another person's agent is untrusted input. Remote senders cannot use `to_kind`. A guessed unshared name and an unknown one get the same refusal |
+| Opt-in per session (`/bridge share`) | Joining a network exposes nothing. Binding a name to a new session clears its share |
+| Bounces are fixed codes, worded by the sender's side | A member can never put its own words into a bridge notice. A bounce counts only for a message really sent to that member |
+| An agent at 50 unread network messages bounces new ones as busy | Holding them would stop the whole mailbox for that machine's other agents |
+| Signed address updates (`agent-bridge-url:1:...`) | A cut-off guest needs the host's new address out of band. It must be signed by the host key pinned at join, with a rising sequence number, so a stranger's address or a replayed old one cannot redirect it |
+| Reconnects get an allowance per member key | Behind a tunnel every caller looks like 127.0.0.1. Strangers never see member keys, so junk requests cannot keep members out. Joins and strangers have separate pools |
+| Leave keeps the handle for that key; kick bans the key | A member who left can rejoin with any invite under its old handle, so other members' pins still fit. A kicked key needs an invite reserved for it, and is told why |
+| Per-member levels (`ask`, `chat`, `work`) set by the user | Asking about every small request is tiring, and a blanket approval drifts to bigger requests. A level states what needs no check; everything beyond it still asks. Guidance in the caution, not enforcement: free text cannot be classified by code |
+| Only a verified key holds a level above `ask`; a key change resets it | With an unverified key the host could pose as the member and inherit the level. A new key is a new party |
+| `net allow` raises a level only outside an agent session | A message could talk an agent into raising its sender's level. Lowering works anywhere |
+| Accepting a changed key (`net trust`, or `net verify` while it is changed) needs the user's terminal | A swapped key looks exactly like a changed one, and `net status` prints its code, so an agent could verify a swap. A first verify stays open to agents: the user reads them the code |
+| Ending a network drops the whole outbox and tells each sender | A kept outbox would go to whoever holds the same handle on the next network |
+| Raising a level asks you to type it back on a terminal | The session check is one `env -u` away. A typed confirmation needs a terminal, which an agent's shell lacks, so a raise takes a deliberate, visible workaround. Not a boundary: the agent runs as you |
+| `--agents` scopes a level to named shared agents, by name | One share for a joint project and another for private work should not get the same level. Keyed by name, like sharing; a name drop falls back to `ask` |
+| A privacy rule at every level: no user name, login, email, full paths or other projects unless the user says so | Live test: at `work`, Haiku volunteered the login name and the absolute path. Levels limit what a member can ask for, not what the agent volunteers |
+| One network per daemon in v1 | Keeps addresses (`agent@member`), status and the CLI simple |
+
 ## Superseded
 
 - **`claude-bridge` launcher as the only Claude path.** Replaced by the plugin monitor, then by the inbox socket. The channel launcher is now `agent-bridge claude`, opt-in.
