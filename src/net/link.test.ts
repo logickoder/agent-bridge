@@ -165,12 +165,13 @@ function network() {
   const store = relayStore(newHostState('team', 'alice', 'https://one.example', randomBytes))
   const relay = new Relay({ store, host, now: () => new Date(), random: randomBytes, wake: h => waits.wake(h) })
 
-  const linkDeps = (hub: Hub, transport: Transport, keys: StaticKeys, logs: string[]) => ({
+  /** `skewMs`: how far this member's clock runs ahead of everyone else's. */
+  const linkDeps = (hub: Hub, transport: Transport, keys: StaticKeys, logs: string[], skewMs = 0) => ({
     hub,
     transport,
     store: { save: () => {} },
     keys,
-    now: () => new Date(),
+    now: () => new Date(Date.now() + skewMs),
     sleep,
     random: Math.random,
     log: (m: string) => void logs.push(m),
@@ -214,7 +215,7 @@ function network() {
   }
 
   /** A guest that joins with a fresh invite. `reserved`: the host re-admits this handle with new keys. */
-  const guest = (wanted: string, reserved?: string): Node => {
+  const guest = (wanted: string, reserved?: string, skewMs = 0): Node => {
     const keys: StaticKeys = { x: generateX25519(), e: generateEd25519() }
     const inv = relay.invite(3600_000, relay.url, reserved)
     const { req, replyKey } = buildJoin({ me: keys, netId: inv.netId, hostX: host.x.pub, token: inv.token, handle: wanted, salt: randomBytes(16) })
@@ -229,7 +230,7 @@ function network() {
       if (!link) throw new Error('no link yet')
       return link
     })
-    link = new Link(state, linkDeps(hub, transport, keys, logs))
+    link = new Link(state, linkDeps(hub, transport, keys, logs, skewMs))
     link.applyDirectory(reply.directory)
     start(link)
     return node(hub, link, keys, state, logs, transport)
@@ -290,6 +291,20 @@ describe('link: messages between members', () => {
     await wait(() => expect(net.store.dump()).toMatch(/"seq":[1-9]/))
     const dump = net.store.dump()
     for (const secret of ['PAPAYA-SECRET-42', 'zebra-planner', 'ocelot-coder']) expect(dump).not.toContain(secret)
+  })
+
+  it('drops a message older than the replay window, and tells the sender why', async () => {
+    const net = network()
+    const alice = net.hostNode()
+    // bob's clock runs 8 days ahead, so alice's fresh message looks 8 days old to bob: as a replay would.
+    const bob = net.guest('bob', undefined, 8 * 24 * 3600_000)
+    const coder = alice.agent('coder')
+    const planner = bob.agent('planner')
+    await remoteOnline(alice, 'planner@bob')
+    alice.send('coder', 'planner@bob', 'stale')
+    await wait(() => expect(coder.msgs.map(m => m.text)).toEqual([expect.stringMatching(/^Your message to planner@bob was not delivered: it reached the other side more than 7 days after it was sent/)]))
+    expect(planner.msgs).toEqual([])
+    expect(bob.logs.join('\n')).toMatch(/dropped a message from alice: sent .*outside the 7-day window/)
   })
 
   it('bounces a message for an agent that is not shared, and tells the sender', async () => {

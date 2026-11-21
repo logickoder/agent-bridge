@@ -1,4 +1,4 @@
-import type { Conn, Inbound, InboundResult, NetView, RefusedCode, SharedPeer } from '../daemon/hub.js'
+import type { Conn, Inbound, InboundResult, NetView, SharedPeer } from '../daemon/hub.js'
 import { verifyHint } from '../format.js'
 import { toError } from '../lib/errors.js'
 import { levelCovers, splitAddress, type AllowLevel, type Message, type NetMemberInfo, type Reply } from '../schema.js'
@@ -6,7 +6,7 @@ import { b64u, concat, fingerprint, sha256 } from './crypto.js'
 import { verifyDirectory } from './directory.js'
 import { openEnvelope, sealEnvelope } from './envelope.js'
 import { verifyMemberSig, type StaticKeys } from './handshake.js'
-import { Inner, type Directory, type LinkState, type MailEntry, type MailKind, type Pin, type RpcOp, type RpcReply } from './schema.js'
+import { Inner, type BounceReason, type Directory, type LinkState, type MailEntry, type MailKind, type Pin, type RpcOp, type RpcReply } from './schema.js'
 
 /**
  * One member's side of a network, between its hub and a transport to the host. It seals outbox messages to the
@@ -101,10 +101,12 @@ const BACKOFF_MAX_MS = 30_000
 const PRESENCE_DEBOUNCE_MS = 1000
 
 /** Notice wording for each bounce reason, chosen here so a member can never put its own words in a bridge notice. */
-const BOUNCE_TEXT: Record<RefusedCode, (agent: string) => string> = {
+const BOUNCE_TEXT: Record<BounceReason, (agent: string) => string> = {
   'not-shared': agent => `"${agent}" is not shared on that network.`,
   'invalid-sender': () => 'the other side refused the sender name.',
   busy: agent => `"${agent}" has too many unread network messages. Send it again later.`,
+  expired: () =>
+    'it reached the other side more than 7 days after it was sent, or the two clocks differ by over an hour, so it was dropped as a possible replay. Send it again if it still matters.',
 }
 
 function backoffMs(attempt: number, random: () => number): number {
@@ -492,7 +494,9 @@ export class Link {
       case 'msg': {
         if (outsideReplayWindow(inner.sentAt, this.deps.now().getTime())) {
           this.deps.log?.(`dropped a message from ${member}: sent ${inner.sentAt}, outside the ${MAX_MESSAGE_AGE_MS / 86_400_000}-day window (a replay, or a clock far off)`)
-          return
+          // The sender is told. A replayed copy bounces too, but the sender believes a bounce only for a message it
+          // still remembers sending, so a replay past that record changes nothing.
+          return void this.bounce(member, pin, envId, 'expired')
         }
         const r = this.deps.hub.inbound({
           fromAgent: inner.from,
@@ -507,7 +511,7 @@ export class Link {
     }
   }
 
-  private async bounce(member: string, pin: Pin, ref: string, reason: RefusedCode): Promise<void> {
+  private async bounce(member: string, pin: Pin, ref: string, reason: BounceReason): Promise<void> {
     try {
       await this.send(member, pin, 'bounce', { t: 'bounce', ref, reason }, Buffer.from(this.randomId()))
     } catch (err) {

@@ -157,6 +157,10 @@ export type HostState = z.infer<typeof HostState>
 /** A member's shared agents, as it announces them. */
 export const PresencePeers = z.array(z.object({ name: PeerName, kind: PeerKind, online: z.boolean() })).max(64)
 
+/** Why a member did not deliver a message: the hub's refusals, or `expired` (outside the replay window). */
+export const BounceReason = z.enum(['not-shared', 'invalid-sender', 'busy', 'expired'])
+export type BounceReason = z.infer<typeof BounceReason>
+
 /** Inside an envelope: what one member says to another. Only the two members can read it. */
 export const Inner = z.discriminatedUnion('t', [
   z.object({ t: z.literal('msg'), from: PeerName, to: PeerName, text: z.string().min(1).max(MAX_REMOTE_TEXT), sentAt: z.iso.datetime() }),
@@ -166,7 +170,7 @@ export const Inner = z.discriminatedUnion('t', [
    * A message could not be delivered. `ref`: its envelope id. The sender only acts on a bounce for a message it
    * really sent to that member, and words the notice itself: the reason is a code, never text from the member.
    */
-  z.object({ t: z.literal('bounce'), ref: B64u.length(22), reason: z.enum(['not-shared', 'invalid-sender', 'busy']) }),
+  z.object({ t: z.literal('bounce'), ref: B64u.length(22), reason: BounceReason }),
 ])
 export type Inner = z.infer<typeof Inner>
 
