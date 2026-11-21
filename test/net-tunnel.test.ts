@@ -81,8 +81,9 @@ describe('trial tunnel', { timeout: 60_000 }, () => {
     squatter.close()
     expect(bind).toBe('EADDRINUSE')
 
-    // The next daemon adopts the keeper and is reachable through it again, on the same port.
-    expect(T.run(['net', 'status'])).toContain(`Local port: ${port}`)
+    // The next daemon adopts the keeper and is reachable through it again, on the same port. It starts from this
+    // command, so it gets the stand-in cloudflared too: without it, a machine with no real cloudflared fails here.
+    expect(T.run(['net', 'status'], env)).toContain(`Local port: ${port}`)
     expect(await health()).toBe(200)
     T.run(['net', 'stop', '--yes'])
   })
