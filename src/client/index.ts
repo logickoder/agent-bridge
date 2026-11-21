@@ -70,12 +70,30 @@ function parseReply(value: unknown): Reply {
   return parsed.data
 }
 
-/** Asks a running daemon to exit. A daemon that is not running is already stopped. */
+/** How long `stopDaemon` waits for the daemon to be gone. It exits within about a second of being asked. */
+const STOP_WAIT_MS = 5000
+
+/**
+ * Asks a running daemon to exit, and returns once it has: a command run right after must start a new daemon, not
+ * reach the old one while it shuts down and have its connection reset. A daemon that is not running is stopped.
+ */
 export async function stopDaemon(): Promise<void> {
   try {
     await request({ op: 'shutdown' }, 'ok', { spawnDaemon: false })
   } catch (err) {
     if (!isDaemonDown(err)) throw err
+    return
+  }
+  const deadline = Date.now() + STOP_WAIT_MS
+  for (;;) {
+    try {
+      const still = await connectOnce()
+      still.destroy()
+    } catch (err) {
+      if (isDaemonDown(err)) return
+    }
+    if (Date.now() > deadline) throw new Error(`The daemon did not stop within ${STOP_WAIT_MS / 1000}s. It may be stuck shutting down. See ${DAEMON_LOG}, or end it by its pid in \`agent-bridge status\`.`)
+    await new Promise(r => setTimeout(r, RETRY_MS))
   }
 }
 
