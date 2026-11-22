@@ -1,125 +1,141 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 492" width="1040" height="492" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 540" width="1120" height="540" role="img" aria-labelledby="title desc">
   <title id="title">How agent-bridge works</title>
   <desc id="desc">On one machine: myapp-claude sends "ready for review" to myapp-agy. The local agent-bridge daemon queues it on disk for that peer, then wakes the idle Antigravity session through agentapi. opencode sessions are reached through a plugin the same way. Across machines, optional: share a session and it gets an address such as myapp-claude@amy. The same daemon seals each message end to end and sends it through a tunnel you host, which sees ciphertext only, to a teammate's daemon, which wakes planner@bob.</desc>
+  <!-- Same design as the diagram on logickoder.dev/agent-bridge (landing/src/components/Diagram.tsx). Keep the two in step. -->
   <style>
-    .bg { fill: #ffffff; }
-    .card { fill: #ffffff; stroke: #1f2328; }
-    .term { fill: #f6f8fa; }
-    .daemon { fill: #1f2328; }
-    .slot { fill: #32383f; }
-    .on-d { fill: #ffffff; }
-    .on-d-mute { fill: #b7bdc5; }
+    .bg { fill: #ffffff; stroke: #d0d7de; }
+    .card { fill: #f6f8fa; stroke: #d0d7de; }
+    .slot { fill: #ffffff; stroke: #d8dee4; }
+    .live { fill: #f6f8fa; stroke: #15803d; }
+    .glow { fill: #15803d; opacity: 0.1; }
+    .term { fill: #0d1117; }
+    .term-t { fill: #e6edf3; }
+    .term-a { fill: #3fcf6e; }
     .ink { fill: #1f2328; }
-    .mute { fill: #57606a; }
-    .line { stroke: #8c959f; fill: none; }
+    .mute { fill: #59636e; }
+    .acc { fill: #15803d; }
+    .on-acc { fill: #ffffff; }
+    .wire { stroke: #d0d7de; stroke-width: 1.5; fill: none; }
+    .head { fill: #d0d7de; }
+    .head-live { fill: #15803d; }
+    .wire-live { stroke: #15803d; }
     .rule { stroke: #d0d7de; fill: none; }
-    .msg { stroke: #15803d; fill: none; }
-    .msg-f { fill: #15803d; }
-    .on-msg { fill: #ffffff; }
-    .on-msg-s { stroke: #ffffff; fill: none; }
-    .stripe { fill: #d0d7de; }
-    .tunnel { stroke: #8c959f; }
-    .sans { font-family: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .hatch { stroke: #d0d7de; }
+    .sans { font-family: Inter, ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .disp { font-family: Anton, Impact, "Arial Narrow", sans-serif; }
+    .cap { letter-spacing: 1px; }
+    .dot { opacity: 0; }
     @media (prefers-color-scheme: dark) {
-      .bg { fill: #0d1117; }
-      .card { fill: #0d1117; stroke: #e6edf3; }
-      .term { fill: #161b22; }
-      .daemon { fill: #e6edf3; }
-      .slot { fill: #ced5dc; }
-      .on-d { fill: #0d1117; }
-      .on-d-mute { fill: #424a53; }
+      .bg { fill: #0d1117; stroke: #30363d; }
+      .card { fill: #161b22; stroke: #30363d; }
+      .slot { fill: #0d1117; stroke: #21262d; }
+      .live { fill: #161b22; stroke: #3fcf6e; }
+      .glow { fill: #3fcf6e; opacity: 0.12; }
       .ink { fill: #e6edf3; }
-      .mute { fill: #8b949e; }
-      .line { stroke: #6e7681; }
+      .mute { fill: #9da7b3; }
+      .acc { fill: #3fcf6e; }
+      .on-acc { fill: #0d1117; }
+      .wire { stroke: #30363d; }
+      .head { fill: #30363d; }
+      .head-live { fill: #3fcf6e; }
+      .wire-live { stroke: #3fcf6e; }
       .rule { stroke: #30363d; }
-      .msg { stroke: #3fcf6e; }
-      .msg-f { fill: #3fcf6e; }
-      .on-msg { fill: #0d1117; }
-      .on-msg-s { stroke: #0d1117; }
-      .stripe { fill: #30363d; }
-      .tunnel { stroke: #6e7681; }
+      .hatch { stroke: #30363d; }
     }
+    /* A message travels each live wire. Off for reduced motion. */
+    @media (prefers-reduced-motion: no-preference) {
+      .dot { animation: travel 2.4s cubic-bezier(0.5, 0, 0.3, 1) infinite; }
+      .pulse { animation: pulse 1.8s ease-in-out infinite; }
+    }
+    @keyframes travel {
+      0% { transform: translateX(0); opacity: 0; }
+      15% { opacity: 1; }
+      70% { transform: translateX(var(--d)); opacity: 1; }
+      80%, 100% { transform: translateX(var(--d)); opacity: 0; }
+    }
+    @keyframes pulse { 50% { opacity: 0.35; } }
   </style>
   <defs>
-    <marker id="a-msg" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="msg-f"/></marker>
-    <marker id="a-line" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8c959f"/></marker>
-    <pattern id="stripes" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="8" class="stripe"/></pattern>
+    <marker id="head" viewBox="0 0 7 10" refX="7" refY="5" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="10" orient="auto"><path d="M0 0L7 5L0 10z" class="head"/></marker>
+    <marker id="head-live" viewBox="0 0 7 10" refX="7" refY="5" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="10" orient="auto"><path d="M0 0L7 5L0 10z" class="head-live"/></marker>
+    <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="8" class="hatch" stroke-width="3"/>
+    </pattern>
   </defs>
-  <rect width="1040" height="492" class="bg"/>
 
-  <!-- ===== One machine ===== -->
-  <text x="32" y="36" class="mono mute" font-size="13" letter-spacing="1">ON ONE MACHINE</text>
+  <rect x="0.5" y="0.5" width="1119" height="539" rx="16" class="bg"/>
 
-  <!-- Sender -->
-  <rect x="32" y="56" width="240" height="120" rx="12" class="card" stroke-width="2"/>
-  <text x="52" y="88" class="sans ink" font-size="15" font-weight="600">Claude Code</text>
-  <text x="52" y="110" class="mono mute" font-size="13">myapp-claude</text>
-  <rect x="52" y="124" width="200" height="34" rx="6" class="term"/>
-  <text x="64" y="146" class="mono ink" font-size="12">› send myapp-agy …</text>
+  <!-- On one machine -->
+  <text x="32" y="44" class="mono mute cap" font-size="12">ON ONE MACHINE</text>
 
-  <!-- 1. send: the message itself rides the arrow -->
-  <path d="M272 128H426" class="msg" stroke-width="3" marker-end="url(#a-msg)"/>
-  <text x="346" y="104" class="mono mute" font-size="12" text-anchor="middle">send</text>
-  <rect x="282" y="114" width="128" height="28" rx="14" class="msg-f"/>
-  <text x="346" y="132" class="mono on-msg" font-size="12" text-anchor="middle">ready for review</text>
+  <rect x="32" y="92" width="320" height="122" rx="12" class="card"/>
+  <text x="48" y="124" class="sans ink" font-size="16" font-weight="600">Claude Code</text>
+  <text x="48" y="148" class="mono mute" font-size="13">myapp-claude</text>
+  <rect x="48" y="164" width="288" height="34" rx="6" class="term"/>
+  <text x="60" y="186" class="mono term-t" font-size="12.5"><tspan class="term-a">›</tspan> send myapp-agy "ready for review"</text>
 
-  <!-- Daemon with its per-peer queues -->
-  <rect x="432" y="56" width="240" height="176" rx="14" class="daemon"/>
-  <text x="552" y="86" class="sans on-d" font-size="16" font-weight="700" text-anchor="middle">agent-bridge daemon</text>
-  <text x="552" y="106" class="mono on-d-mute" font-size="12" text-anchor="middle">queues on disk, per peer</text>
-  <rect x="452" y="122" width="200" height="40" rx="8" class="slot"/>
-  <text x="466" y="147" class="mono on-d" font-size="12">myapp-agy</text>
-  <circle cx="594" cy="143" r="5" class="msg-f"/>
-  <text x="638" y="147" class="mono on-d" font-size="12" text-anchor="end">1</text>
-  <rect x="452" y="172" width="200" height="40" rx="8" class="slot"/>
-  <text x="466" y="197" class="mono on-d" font-size="12">myapp-opencode</text>
-  <text x="638" y="197" class="mono on-d-mute" font-size="12" text-anchor="end">0</text>
+  <text x="396" y="140" class="mono mute" font-size="12" text-anchor="middle">send</text>
+  <line x1="362" y1="153" x2="431" y2="153" class="wire wire-live" marker-end="url(#head-live)"/>
+  <circle cx="362" cy="153" r="4" class="dot acc" style="--d: 62px"/>
 
-  <!-- 2. wake the idle receiver through its own interface -->
-  <path d="M672 142C736 142 732 94 794 94" class="msg" stroke-width="3" marker-end="url(#a-msg)"/>
-  <text x="736" y="72" class="mono mute" font-size="12" text-anchor="middle">wakes · agentapi</text>
-  <path d="M672 192H794" class="line" stroke-width="2" marker-end="url(#a-line)"/>
-  <text x="736" y="184" class="mono mute" font-size="12" text-anchor="middle">plugin</text>
+  <rect x="434" y="64" width="356" height="178" rx="16" class="glow"/>
+  <rect x="440" y="70" width="344" height="166" rx="12" class="live" stroke-width="1.5"/>
+  <text x="458" y="106" class="disp ink" font-size="24">agent-bridge daemon</text>
+  <text x="458" y="126" class="mono mute" font-size="12">queues on disk, per peer</text>
+  <rect x="458" y="140" width="308" height="36" rx="6" class="slot"/>
+  <text x="472" y="163" class="mono ink" font-size="13">myapp-agy</text>
+  <circle cx="736" cy="158" r="4" class="acc pulse"/>
+  <text x="748" y="163" class="mono ink" font-size="13">1</text>
+  <rect x="458" y="184" width="308" height="36" rx="6" class="slot"/>
+  <text x="472" y="207" class="mono mute" font-size="13">myapp-opencode</text>
+  <text x="748" y="207" class="mono mute" font-size="13">0</text>
 
-  <!-- Receivers -->
-  <rect x="800" y="56" width="208" height="76" rx="12" class="card" stroke-width="2"/>
-  <text x="818" y="86" class="sans ink" font-size="15" font-weight="600">Antigravity</text>
-  <text x="818" y="110" class="mono mute" font-size="13">myapp-agy</text>
-  <rect x="932" y="72" width="60" height="22" rx="11" class="msg-f"/>
-  <text x="962" y="87" class="mono on-msg" font-size="11" text-anchor="middle">woken</text>
-  <rect x="800" y="156" width="208" height="76" rx="12" class="card" stroke-width="2"/>
-  <text x="818" y="186" class="sans ink" font-size="15" font-weight="600">opencode</text>
-  <text x="818" y="210" class="mono mute" font-size="13">myapp-opencode</text>
+  <text x="851" y="94" class="mono mute" font-size="11.5" text-anchor="middle">wakes · agentapi</text>
+  <line x1="798" y1="106" x2="907" y2="106" class="wire wire-live" marker-end="url(#head-live)"/>
+  <circle cx="798" cy="106" r="4" class="dot acc" style="--d: 102px"/>
 
-  <!-- ===== Across machines ===== -->
-  <path d="M32 264H1008" class="rule" stroke-width="1.5" stroke-dasharray="6 6"/>
-  <text x="32" y="300" class="mono mute" font-size="13" letter-spacing="1">ACROSS MACHINES · OPTIONAL</text>
-  <text x="32" y="332" class="sans mute" font-size="14">Share a session and it gets an address:</text>
-  <text x="32" y="356" class="mono ink" font-size="13">myapp-claude@amy</text>
-  <text x="32" y="384" class="sans mute" font-size="14">Same daemon. No agent-bridge</text>
-  <text x="32" y="404" class="sans mute" font-size="14">server in between.</text>
+  <text x="851" y="188" class="mono mute" font-size="12" text-anchor="middle">plugin</text>
+  <line x1="798" y1="200" x2="907" y2="200" class="wire" marker-end="url(#head)"/>
 
-  <!-- 3. sealed, through your tunnel -->
-  <path d="M552 232V400H712" class="msg" stroke-width="3"/>
-  <text x="628" y="376" class="mono mute" font-size="12" text-anchor="middle">end-to-end encrypted</text>
-  <rect x="578" y="386" width="96" height="28" rx="14" class="msg-f"/>
-  <path d="M591 398.5v-3a4 4 0 0 1 8 0v3" class="on-msg-s" stroke-width="1.75"/>
-  <rect x="589" y="398" width="12" height="9" rx="1.5" class="on-msg"/>
-  <text x="608" y="405" class="mono on-msg" font-size="12">sealed</text>
+  <rect x="914" y="68" width="174" height="76" rx="12" class="live" stroke-width="1.5"/>
+  <text x="930" y="99" class="sans ink" font-size="16" font-weight="600">Antigravity</text>
+  <rect x="1030" y="85" width="48" height="19" rx="9.5" class="acc pulse"/>
+  <text x="1054" y="98.5" class="mono on-acc" font-size="11" text-anchor="middle">woken</text>
+  <text x="930" y="124" class="mono mute" font-size="13">myapp-agy</text>
 
-  <rect x="716" y="288" width="28" height="152" rx="4" fill="url(#stripes)" class="tunnel" stroke-width="1.5"/>
-  <text x="730" y="462" class="mono mute" font-size="12" text-anchor="middle">tunnel you host</text>
-  <text x="730" y="480" class="mono mute" font-size="12" text-anchor="middle">sees ciphertext only</text>
-  <path d="M744 400H802" class="msg" stroke-width="3" marker-end="url(#a-msg)"/>
+  <rect x="914" y="162" width="174" height="76" rx="12" class="card"/>
+  <text x="930" y="193" class="sans ink" font-size="16" font-weight="600">opencode</text>
+  <text x="930" y="218" class="mono mute" font-size="13">myapp-opencode</text>
 
-  <!-- Teammate's machine -->
-  <rect x="792" y="280" width="216" height="160" rx="12" class="rule" stroke-width="1.5" stroke-dasharray="6 6"/>
-  <rect x="808" y="292" width="184" height="52" rx="10" class="card" stroke-width="2"/>
-  <text x="824" y="314" class="sans ink" font-size="14" font-weight="600">Claude Code</text>
-  <text x="824" y="333" class="mono mute" font-size="12">planner@bob</text>
-  <rect x="808" y="376" width="184" height="48" rx="10" class="daemon"/>
-  <text x="900" y="405" class="sans on-d" font-size="14" font-weight="700" text-anchor="middle">their daemon</text>
-  <path d="M900 376V350" class="msg" stroke-width="3" marker-end="url(#a-msg)"/>
-  <text x="910" y="367" class="mono mute" font-size="11">wakes</text>
+  <line x1="32" y1="272" x2="1088" y2="272" class="rule" stroke-dasharray="4 4"/>
+
+  <!-- Across machines -->
+  <text x="32" y="314" class="mono mute cap" font-size="12">ACROSS MACHINES · OPTIONAL</text>
+  <text x="32" y="404" class="sans mute" font-size="15">Share a session and it gets an address:</text>
+  <text x="32" y="428" class="sans mute" font-size="15"><tspan class="mono acc" font-size="14">myapp-claude@amy</tspan>. Same daemon. No</text>
+  <text x="32" y="452" class="sans mute" font-size="15">agent-bridge server in between.</text>
+
+  <rect x="360" y="414" width="96" height="28" rx="14" class="acc"/>
+  <path d="M378 427v-2.5a4 4 0 1 1 8 0v2.5h1v8h-10v-8zm2 0h4v-2.5a2 2 0 1 0-4 0z" class="on-acc"/>
+  <text x="394" y="432.5" class="mono on-acc" font-size="13">sealed</text>
+
+  <text x="554" y="414" class="mono mute" font-size="12" text-anchor="middle">end-to-end encrypted</text>
+  <line x1="466" y1="428" x2="643" y2="428" class="wire wire-live" marker-end="url(#head-live)"/>
+  <circle cx="466" cy="428" r="4" class="dot acc" style="--d: 170px"/>
+
+  <rect x="656" y="388" width="24" height="80" rx="4" class="rule" style="fill: url(#hatch)"/>
+  <text x="668" y="492" class="mono mute" font-size="12" text-anchor="middle">tunnel you host</text>
+  <text x="668" y="508" class="mono mute" font-size="12" text-anchor="middle">sees ciphertext only</text>
+
+  <line x1="690" y1="428" x2="867" y2="428" class="wire wire-live" marker-end="url(#head-live)"/>
+  <circle cx="690" cy="428" r="4" class="dot acc" style="--d: 170px"/>
+
+  <rect x="880" y="338" width="208" height="172" rx="12" class="rule" stroke-dasharray="4 4"/>
+  <rect x="892" y="350" width="184" height="48" rx="12" class="card"/>
+  <text x="984" y="379" class="sans ink" font-size="16" font-weight="600" text-anchor="middle">their daemon</text>
+  <text x="984" y="424" class="mono mute" font-size="12" text-anchor="middle">↓ wakes</text>
+  <rect x="892" y="440" width="184" height="58" rx="12" class="card"/>
+  <text x="908" y="465" class="sans ink" font-size="16" font-weight="600">Claude Code</text>
+  <text x="908" y="488" class="mono mute" font-size="13">planner@bob</text>
 </svg>
