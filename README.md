@@ -4,6 +4,8 @@
 
 <p align="center">Live messaging between agent CLI sessions, as named peers. Claude Code, Antigravity and opencode today. Each message wakes the receiving session in place, even when it is idle. No polling, no headless runs, no tmux.</p>
 
+<p align="center"><a href="https://logickoder.dev/agent-bridge/">logickoder.dev/agent-bridge</a> · <a href="https://www.npmjs.com/package/@logickoder/agent-bridge">npm</a></p>
+
 ## Quick start
 
 ```sh

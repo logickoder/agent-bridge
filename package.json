@@ -56,7 +56,7 @@
     "agent-to-agent",
     "cli"
   ],
-  "homepage": "https://github.com/logickoder/agent-bridge#readme",
+  "homepage": "https://logickoder.dev/agent-bridge/",
   "bugs": {
     "url": "https://github.com/logickoder/agent-bridge/issues"
   }
