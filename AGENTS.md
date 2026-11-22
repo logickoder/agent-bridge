@@ -27,6 +27,7 @@
 | `src/adapters/opencode/plugin/` | The opencode plugin. Standalone (node built-ins only): install copies the built file into opencode's plugins folder |
 | `src/adapters/claude/plugin/` | The Claude plugin: `/bridge` (socket) and `/bridge-monitor` skills sharing `shared/peer-messages.md`, the monitor, and the bypass-guard hook. Registered by install through the repo's `.claude-plugin/marketplace.json` |
 | `docs/` | User docs (`concepts.md`, `install.md`, `agents/`) and the design record (`decisions.md`, `live-tests.md`, `adding-an-agent.md`, `open-questions.md`). Agent findings live in `docs/agents/<agent>.md`; never name a file there `claude.md`, macOS loads it as `CLAUDE.md` |
+| `landing/` | The product page at logickoder.dev/agent-bridge. Its own Vite + React + Tailwind project with its own lockfile, deployed by `.github/workflows/site.yml`. Reads the version from the root `package.json`. The favicon and social card are served from `docs/assets` by a plugin in `landing/vite.config.ts`; edit them in `docs/assets`. Not part of the npm package |
 | `test/` | Tests that touch real files, sockets or processes. `e2e.test.ts` runs against `dist/cli.js`. `net*.test.ts` run several homes as separate users through `harness.ts` (homes, `until`, `socketRequest`, `tty` on a pseudo-terminal), with `proxy.ts` (a recording, tampering stand-in for the tunnel) |
 
 ## Rules
