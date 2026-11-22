@@ -1,11 +1,9 @@
 import { DOCS, REPO, VERSION } from '../site';
-import { useTheme } from '../theme';
+import { toggleTheme } from '../theme';
 import { GitHubIcon, Logo, MoonIcon, SunIcon } from './Icons';
 import { OUTLINE_BUTTON, Pill, Wrap } from './Layout';
 
 export function Nav() {
-  const { theme, toggle } = useTheme();
-  const dark = theme === 'dark';
   return (
     <header className="border-b border-rule2">
       <Wrap>
@@ -19,13 +17,16 @@ export function Nav() {
             <a className="hidden md:inline" href="#how">How it works</a>
             <a className="hidden md:inline" href="#networks">Networks</a>
             <a className="hidden md:inline" href={DOCS}>Docs</a>
-            <button
-              type="button"
-              onClick={toggle}
-              aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
-              className={OUTLINE_BUTTON}
-            >
-              {dark ? <SunIcon width={18} height={18} /> : <MoonIcon width={18} height={18} />}
+            {/* Both states are in the HTML; CSS shows the one matching html[data-theme]. */}
+            <button type="button" onClick={toggleTheme} className={OUTLINE_BUTTON}>
+              <span className="when-dark">
+                <SunIcon width={18} height={18} />
+                <span className="sr-only">Switch to light theme</span>
+              </span>
+              <span className="when-light">
+                <MoonIcon width={18} height={18} />
+                <span className="sr-only">Switch to dark theme</span>
+              </span>
             </button>
             <a href={REPO} aria-label="agent-bridge on GitHub" className={`${OUTLINE_BUTTON} w-11 xs:w-auto xs:px-3.5`}>
               <GitHubIcon width={16} height={16} />

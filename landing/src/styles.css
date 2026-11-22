@@ -224,6 +224,11 @@ html[data-theme='light'] {
     opacity: 0;
     pointer-events: none;
   }
+  /* Theme-dependent content, chosen by html[data-theme] so prerendered HTML needs no JavaScript. */
+  html[data-theme='light'] .when-dark,
+  html:not([data-theme='light']) .when-light {
+    display: none;
+  }
   .lift {
     transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1), border-color 0.25s;
   }

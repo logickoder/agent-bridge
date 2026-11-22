@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { INSTALL_NPM, INSTALL_SOURCE } from '../site';
 import { CopyIcon } from './Icons';
 import { OUTLINE_BUTTON } from './Layout';
@@ -17,13 +17,15 @@ const COPY_LABEL: Record<CopyState, string> = {
   failed: 'Copy failed',
 };
 const RESET_MS = 2000;
-// Client-only page: the clipboard API either works here or it doesn't, for the whole visit.
-const CAN_COPY = Boolean(navigator.clipboard) && window.isSecureContext;
+// The clipboard API works here or it doesn't, for the whole visit. Never in the prerendered HTML.
+const noSubscribe = () => () => {};
+const canCopy = () => Boolean(navigator.clipboard) && window.isSecureContext;
 
 /** Tabbed install commands with a copy button (shown only where the clipboard API works). */
 export function InstallBox() {
   const [active, setActive] = useState<MethodId>('npm');
   const [copy, setCopy] = useState<CopyState>('idle');
+  const showCopy = useSyncExternalStore(noSubscribe, canCopy, () => false);
   const tabRefs = useRef<Partial<Record<MethodId, HTMLButtonElement | null>>>({});
   const method = METHODS.find((m) => m.id === active) ?? METHODS[0];
 
@@ -104,7 +106,7 @@ export function InstallBox() {
             <span className="caret" aria-hidden="true" />
           </pre>
         ))}
-        {CAN_COPY && (
+        {showCopy && (
           <button
             type="button"
             onClick={onCopy}

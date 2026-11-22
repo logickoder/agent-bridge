@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, hydrateRoot } from 'react-dom/client';
 import { App } from './App';
 // Self-hosted fonts, latin subset only. Same families as logickoder.dev.
 import '@fontsource/inter/latin-400.css';
@@ -13,8 +13,12 @@ import './styles.css';
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root not found. index.html must contain <div id="root">.');
 
-createRoot(rootEl).render(
+const app = (
   <StrictMode>
     <App />
-  </StrictMode>,
+  </StrictMode>
 );
+
+// The build prerenders the page into #root; dev serves only the marker comment.
+if (rootEl.firstElementChild) hydrateRoot(rootEl, app);
+else createRoot(rootEl).render(app);
