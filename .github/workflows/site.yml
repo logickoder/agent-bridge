@@ -1,0 +1,83 @@
+name: Site
+
+# Builds landing/ (Vite + React) and deploys it to GitHub Pages at logickoder.dev/agent-bridge.
+# The build reads the CLI version from the root package.json and takes shared images from docs/assets,
+# so a release or a new graphic redeploys too.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "landing/**"
+      - "docs/assets/**"
+      - "package.json"
+      - ".github/workflows/site.yml"
+  # PRs build only, so a broken page fails before it merges.
+  pull_request:
+    paths:
+      - "landing/**"
+      - "docs/assets/**"
+      - "package.json"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: landing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # Version comes from packageManager in landing/package.json.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          package_json_file: landing/package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: landing/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Upload site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: landing/dist
+
+  # Separate job: deploy rights never sit next to dependency code.
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    # One deploy at a time. A deploy in flight always finishes; the newest queued run goes next.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
