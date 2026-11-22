@@ -1,31 +1,22 @@
-import { useState } from 'react';
 import { THEME_KEY } from './theme-config';
 
 type Theme = 'dark' | 'light';
 
-function current(): Theme {
-  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-}
-
-function apply(theme: Theme): void {
-  document.documentElement.setAttribute('data-theme', theme);
+/**
+ * Flips the theme the pre-paint script set. Nothing here holds theme state: the toggle's icon and label
+ * follow html[data-theme] through CSS (.when-dark / .when-light), so the prerendered HTML is right before
+ * JavaScript loads.
+ */
+export function toggleTheme(): void {
+  const root = document.documentElement;
+  const next: Theme = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  root.setAttribute('data-theme', next);
   // The browser bar follows the page background, read from the tokens in styles.css.
-  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bg);
   try {
-    localStorage.setItem(THEME_KEY, theme);
+    localStorage.setItem(THEME_KEY, next);
   } catch {
     // Storage blocked (private mode, site data off): the toggle still works for this visit.
   }
-}
-
-/** Reads the theme index.html set before first paint, and flips it. */
-export function useTheme(): { theme: Theme; toggle: () => void } {
-  const [theme, setTheme] = useState<Theme>(current);
-  function toggle() {
-    const next: Theme = theme === 'light' ? 'dark' : 'light';
-    apply(next);
-    setTheme(next);
-  }
-  return { theme, toggle };
 }
