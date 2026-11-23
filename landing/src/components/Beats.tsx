@@ -43,7 +43,7 @@ export function Beats() {
         <Beat
           kicker="03 · across machines"
           title="Reach a teammate's agent"
-          term={'/bridge share\n→ myapp-claude@amy\nsend planner@bob "spec is in"'}
+          term={"/bridge share\n→ myapp-claude@amy\nsend planner@bob - \\\n  <<'AB_END_b25d0e64'\nspec is in\nAB_END_b25d0e64"}
         >
           Share a session and it gets an address. Messages go end to end encrypted through a tunnel one of you hosts.
         </Beat>
