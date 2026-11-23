@@ -47,10 +47,12 @@ describe('opencode plugin', () => {
     expect(f.prompts).toEqual([{ sessionID: 'ses_1', text: 'hello from agy' }])
   })
 
-  it('sends as the joined name, with the session id, and refuses before join', async () => {
+  it('sends as the joined name, with the text on stdin, and refuses before join', async () => {
     const execs: string[][] = []
-    const exec: Exec = async args => {
+    const inputs: (string | undefined)[] = []
+    const exec: Exec = async (args, _env, _cwd, input) => {
       execs.push(args)
+      inputs.push(input)
       return args[0] === 'join' ? 'Joined agent-bridge as "proj-opencode".' : 'Delivered live to agy (id x).'
     }
     const spawn: Spawn = () => ({ stdout: new PassThrough(), kill: () => {} })
@@ -61,9 +63,11 @@ describe('opencode plugin', () => {
     await f.tools.find(t => t.name === 'bridge_join')?.execute({}, toolCtx)
     const out = await send?.execute({ to: 'agy', text: 'hi' }, toolCtx)
     expect(out?.content).toMatch(/Delivered live/)
-    expect(execs[1]).toEqual(['send', '--as', 'proj-opencode', 'agy', 'hi'])
-    await send?.execute({ to_kind: 'claude', text: 'hi' }, toolCtx)
-    expect(execs[2]).toEqual(['send', '--as', 'proj-opencode', '--to-kind', 'claude', 'hi'])
+    expect(execs[1]).toEqual(['send', '--as', 'proj-opencode', 'agy', '-'])
+    expect(inputs[1]).toBe('hi')
+    await send?.execute({ to_kind: 'claude', text: '-' }, toolCtx)
+    expect(execs[2]).toEqual(['send', '--as', 'proj-opencode', '--to-kind', 'claude', '-'])
+    expect(inputs[2]).toBe('-')
   })
 
   it('shares and unshares the joined name with the session id, and refuses before join', async () => {

@@ -160,7 +160,8 @@ export const Request = z.discriminatedUnion('op', [
     to: Address.optional(),
     toKind: PeerKind.optional(),
     folder: z.string().min(1).optional(),
-    text: z.string().trim().min(1),
+    // Kept as sent: leading indentation is part of the text. Only all-blank text is refused.
+    text: z.string().refine(t => t.trim().length > 0, 'text is empty'),
     sessions: z.array(z.string().min(1)).optional(),
   })
     .refine(r => (r.to === undefined) !== (r.toKind === undefined), 'send needs exactly one of `to` or `toKind`.')

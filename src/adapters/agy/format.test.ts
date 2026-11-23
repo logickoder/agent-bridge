@@ -37,7 +37,7 @@ describe('reply hints for unverified senders', () => {
 describe('messages from another user\'s agent', () => {
   it('gives a reply command and the caution, not the unchecked-peer hint', () => {
     const out = formatListened(msg({ from: 'planner@bob', verified: false, origin: { network: 'team', member: 'bob', keyVerified: false, allow: 'ask' } }))
-    expect(out).toContain('agent-bridge send --as agy planner@bob "<reply>"')
+    expect(out).toMatch(/agent-bridge send --as agy planner@bob - <<'AB_END_[0-9a-f]{8}'/)
     expect(out).toMatch(/untrusted input/)
     expect(out).not.toMatch(/not a checked peer/)
   })

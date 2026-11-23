@@ -1,4 +1,4 @@
-import { fenceBody, isBridgeNotice, isRemote, messageHeader, remoteCaution, replyOr } from '../../format.js'
+import { fenceBody, isBridgeNotice, isRemote, messageHeader, remoteCaution, replyOr, sendGuide, sendHeredoc } from '../../format.js'
 import type { Message } from '../../schema.js'
 
 /** agy's run_command option: return to the agent this soon, leaving the command in the background. */
@@ -6,7 +6,7 @@ const WAIT_MS = 500
 
 export const listenCommand = (as: string): string => `agent-bridge listen --as ${as}`
 
-export const sendHint = (as: string): string => `Send by running \`agent-bridge send --as ${as} <peer> "<message>"\` with run_command.`
+export const sendHint = (as: string): string => `Send with run_command: ${sendGuide(as)}.`
 
 export const rearmHint = (as: string): string =>
   `Before you end your turn, re-arm: run \`${listenCommand(as)}\` with run_command as a background command (WaitMsBeforeAsync ${WAIT_MS}), then end your turn. It wakes you when the next message arrives.`
@@ -15,9 +15,10 @@ const header = (m: Message): string => `${messageHeader(m, { ts: true })}:`
 
 function replyHint(m: Message): string {
   if (isBridgeNotice(m)) return replyOr(m, '')
+  const hint = `Reply with run_command: ${sendHeredoc(m.to, m.from, 'reply')}.`
   // Another user's agent: the network checked the member, so a reply reaches it.
-  if (isRemote(m)) return `Reply by running \`agent-bridge send --as ${m.to} ${m.from} "<reply>"\` with run_command. ${remoteCaution(m)}`
-  if (m.verified === true) return `Reply by running \`agent-bridge send --as ${m.to} ${m.from} "<reply>"\` with run_command.`
+  if (isRemote(m)) return `${hint} ${remoteCaution(m)}`
+  if (m.verified === true) return hint
   return `"${m.from}" is not a checked peer, so it may not be able to receive a reply. Answer the user instead, unless \`agent-bridge peers\` lists it online.`
 }
 

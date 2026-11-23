@@ -2,11 +2,12 @@
 import { ADAPTERS } from './adapters/index.js'
 import type { Command } from './adapters/types.js'
 import { request, resolveName, stopDaemon } from './client/index.js'
-import { formatPeers, formatSent, remoteView } from './format.js'
+import { formatPeers, formatSent, remoteView, sendMarker } from './format.js'
 import { address, peerKind, peerName, takeFlag, takeSwitch } from './lib/args.js'
 import { toError } from './lib/errors.js'
 import { askTerminal } from './lib/tty.js'
 import { logger } from './lib/log.js'
+import { readStdin } from './lib/wire.js'
 import { sessionTag } from './names.js'
 import { HOME } from './paths.js'
 import { PeerKind } from './schema.js'
@@ -22,7 +23,8 @@ const USAGE = [
   '  join [name] [--kind k] [--no-push] [--take]  bind this session\'s name (auto: <folder>-<kind>; a name renames); --take: take a name online elsewhere',
   '  peers [--all]                  who is online (offline ones counted; --all lists everyone)',
   '  whoami                         this session\'s peer name(s), from the agent\'s session id',
-  '  send [--as me] <to|--to-kind k> <text...>  send; --to-kind: the one online peer of that kind in this folder',
+  '  marker                         a random heredoc end marker, for `send ... - <<\'<marker>\'`',
+  '  send [--as me] <to|--to-kind k> <text...|->  send; - reads the text from stdin; --to-kind: the one online peer of that kind in this folder',
   '  leave <name>                   unbind a peer and stop its listeners',
   '  net host|invite|connect|status|share|unshare|verify|...  networks across machines: `agent-bridge net help`',
   '  restart                        stop the daemon; the next client starts the new one',
@@ -69,11 +71,16 @@ async function main(argv: string[]): Promise<void> {
       // --to-kind <kind> instead of a name: the daemon picks the one online peer of that kind in this folder.
       const byKind = rest[0] === '--to-kind'
       const words = byKind ? rest.slice(2) : rest.slice(1)
+      // `-` reads the text from stdin, so agents can pass it through a quoted heredoc and the shell expands nothing in it.
+      const fromStdin = words.length === 1 && words[0] === '-'
+      if (fromStdin && process.stdin.isTTY) throw new Error('send - reads the text from stdin, but stdin is a terminal. Nothing was piped in. Pass the text in a quoted heredoc: `send <to> - <<\'<marker>\'`, the text, then the marker.')
+      const text = fromStdin ? (await readStdin()).replace(/\r?\n$/, '') : words.join(' ')
+      if (!text.trim()) throw new Error('send has no message text. Nothing came after the recipient, or stdin was empty. Pass the text, or `-` with the text on stdin.')
       const target = byKind ? { toKind: peerKind(rest[1], '--to-kind'), folder: process.cwd() } : { to: address(rest[0], 'Recipient') }
       // The agent sessions this shell belongs to. The daemon checks `from` against them. Without --as the
       // sender is plain `shell`, which no session holds, so no session is attached and it goes unverified.
       const sessions = args[0] !== '--as' ? [] : envSessions().map(s => s.id)
-      const r = await request({ op: 'send', from, ...target, text: words.join(' '), ...(sessions.length ? { sessions } : {}) }, 'sent')
+      const r = await request({ op: 'send', from, ...target, text, ...(sessions.length ? { sessions } : {}) }, 'sent')
       return out(formatSent(r.to ?? target.to ?? '', r))
     }
     case 'status': {
@@ -107,6 +114,9 @@ async function main(argv: string[]): Promise<void> {
       const r = await request({ op: 'status' }, 'status')
       return out(formatPeers(r.peers, { all: takeSwitch(args, '--all'), folder: process.cwd(), ...remoteView(r) }))
     }
+    case 'marker':
+      // A heredoc end marker for an agent sending with no hint at hand. Agents never invent one: theirs repeat.
+      return out(sendMarker())
     case 'whoami': {
       const sessions = envSessions().map(s => s.id)
       if (!sessions.length) throw new Error('no agent session id in this shell. Run whoami from inside an agent session.')

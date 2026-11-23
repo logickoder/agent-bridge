@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { formatSent, remoteCaution, senderLabel } from './format.js'
+import { formatSent, remoteCaution, sendHeredoc, sendMarker, senderLabel } from './format.js'
+
+describe('sendHeredoc', () => {
+  it('gives each hint its own marker, so a message cannot plant the line that ends the heredoc', () => {
+    const markers = new Set(Array.from({ length: 50 }, () => sendMarker()))
+    expect(markers.size).toBe(50)
+    for (const m of markers) expect(m).toMatch(/^AB_END_[0-9a-f]{8}$/)
+    const hint = sendHeredoc('me', 'you', 'reply')
+    const end = /<<'(AB_END_[0-9a-f]{8})'/.exec(hint)?.[1]
+    expect(hint).toBe(`\`agent-bridge send --as me you - <<'${end}'\`, then the reply on the next lines, then a line with only \`${end}\``)
+  })
+})
 
 describe('formatSent', () => {
   it('says live or queued', () => {

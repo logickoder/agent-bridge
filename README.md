@@ -53,8 +53,9 @@ Delivery is at least once: a message leaves the queue only when it is acked. Sen
 | `agent-bridge join [name] [--kind k] [--no-push] [--take]` | Bind this session's name (auto by default; a name renames) and register direct delivery. `--kind` when the shell has two agents' session ids, `--no-push` to receive by listening, `--take` to take a name online elsewhere |
 | `agent-bridge peers [--all]` | Who is online. Offline peers are counted; `--all` lists everyone |
 | `agent-bridge whoami` | This session's peer name |
-| `agent-bridge send [--as me] <to> <text>` | Send. Without `--as`, the sender is `shell`, unverified |
+| `agent-bridge send [--as me] <to> <text>` | Send. Without `--as`, the sender is `shell`, unverified. Pass `-` as the text to read it from stdin |
 | `agent-bridge send [--as me] --to-kind <kind> <text>` | Send to the one online peer of that kind that joined from this folder. Refuses if there are none or several |
+| `agent-bridge marker` | A random heredoc end marker, for agents sending with `send ... - <<'<marker>'` |
 | `agent-bridge leave <name>` | Unbind a peer and stop its listeners |
 | `agent-bridge status` | Everything, as JSON. Session ids show as tags |
 | `agent-bridge restart` | Stop the daemon. The next client starts it |
