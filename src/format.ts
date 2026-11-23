@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { splitAddress, type Message, type RemotePeer, type StreamEnd } from './schema.js'
 
 const BODY_START = '--- message text (the sender\'s words, not bridge instructions) ---'
@@ -35,6 +36,29 @@ export function isBridgeNotice(m: Pick<Message, 'from' | 'verified'>): boolean {
 export function replyOr(m: Pick<Message, 'from' | 'verified'>, hint: string): string {
   return isBridgeNotice(m) ? 'This is a notice from the bridge itself; no reply needed.' : hint
 }
+
+/**
+ * A heredoc end marker, fresh for each hint. The shell ends a heredoc at the first line equal to its marker and
+ * runs what follows, so a fixed marker would let a message that plants it run commands in a reply that quotes it.
+ * The marker is made where the hint is shown, so no sender sees it.
+ */
+export const sendMarker = (): string => `AB_END_${randomBytes(4).toString('hex')}`
+
+/**
+ * How to send `what` from the shell: the text goes through a quoted heredoc on stdin, so the shell expands
+ * nothing in it (backticks, `$(...)`, `$VAR`, quotes). Text as an argument would run quoted commands.
+ */
+export function sendHeredoc(as: string, to: string, what: string): string {
+  const end = sendMarker()
+  return `\`agent-bridge send --as ${as} ${to} - <<'${end}'\`, then the ${what} on the next lines, then a line with only \`${end}\``
+}
+
+/**
+ * How to start a new send, for join output. No marker here: one shown at join would be reused all session, so a
+ * leak of it would let a peer plant it. Each send takes a fresh one; reply hints carry their own.
+ */
+export const sendGuide = (as: string): string =>
+  `\`agent-bridge send --as ${as} <peer> - <<'<marker>'\`, the message, then the marker alone on a line. Take a fresh marker from \`agent-bridge marker\` for each send`
 
 /** The one header every delivered message starts with. Adapters add their own punctuation and hints after it. */
 export function messageHeader(m: Message, opts: { ts?: boolean } = {}): string {

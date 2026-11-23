@@ -27,6 +27,7 @@ Why the bridge works the way it does. Findings referenced here live in [agents/]
 | One receive path per session | A push next to a stream listener is refused, and `join` reports it |
 | An adapter with `alive` gets its endpoints saved | Claude's socket path is safe on disk and survives a daemon restart. Antigravity's holds a CSRF token, so it has no `alive` and stays in memory. A restored endpoint is checked before it gets mail. The check compares the socket file's inode and creation time: the path holds a pid, which a later session can reuse |
 | Peers record their folder; the daemon resolves `--to-kind` | The agent next to you is usually the one you mean. The hub holds the folders, so any client can use it. Several matches refuse rather than guess. Exact folder only: a subfolder does not match |
+| Agents send text on stdin, through a quoted heredoc with a random end marker (`send ... - <<'<marker>'`) | The marker is made where the hint is shown, per hint, or by `agent-bridge marker`, never by the agent (a model's "random" marker repeats): the shell ends a heredoc at the first line equal to its marker and runs the rest, so a fixed marker would let a quoted message plant it. Text passed as a double-quoted argument is expanded by the shell: backticks or `$(...)` quoted from a message ran on the sender's machine and dropped out of the text (#8). Sending only through MCP tools would avoid the shell but lose the session-id check on `--as`. opencode's tool passes the text on stdin too, never through a shell |
 
 ## Per agent
 

@@ -40,6 +40,7 @@
 - Import an adapter only through its `index.ts`. Files inside an adapter folder do not import from other adapters.
 - Use `src/lib/` for errno checks, JSON files, logging and JSON lines. Do not hand-roll them in a module. Logs go to stderr only: stdout carries MCP and hook output.
 - Validate everything that crosses a process boundary with the schemas in `src/schema.ts`.
+- Message text never goes on a command line that a shell parses. Agent hints use `sendHeredoc` in `src/format.ts` (text on stdin, quoted heredoc, a random end marker per hint or from `agent-bridge marker`; never a fixed or agent-made marker). Tests for send paths an agent runs through a shell go through a real `sh -c`, not only an argv array (opencode's tool passes argv and stdin, with no shell).
 - New agent kind: add it to `PEER_KINDS`, create `src/adapters/<kind>/` with an `index.ts` exporting the `Adapter`, register it in `ADAPTERS`, add e2e coverage. See `docs/adding-an-agent.md`. Never branch on kind outside `src/adapters/`.
 - Never ship an Antigravity PreToolUse hook that returns `{}` for calls it does not mean to gate. Antigravity treats `{}` as deny (`docs/agents/antigravity.md`, finding 5).
 - After changing `src/`, run `pnpm build` and `agent-bridge install` so the live daemon restarts on the new code.

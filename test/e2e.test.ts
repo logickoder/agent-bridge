@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { onLines } from '../src/lib/wire.js'
+import { sendMarker } from '../src/format.js'
 import { sessionTag } from '../src/names.js'
 import { CLI, home, REPO, until } from './harness.js'
 
@@ -154,6 +155,75 @@ describe('agy listener', () => {
   })
 })
 
+describe('send through a shell', () => {
+  // Agents send from a shell. Text that looks like shell syntax must arrive as text and never run (issue #8).
+  const canary = (n: string): string => path.join(HOME, `canary-${n}`)
+  const BODY = [
+    `Issue text: run \`touch ${canary('tick')}\` first`,
+    `then $(touch ${canary('dollar')}) and $HOME and \${HOME}`,
+    `it's "quoted", 'single' and a \\ backslash`,
+    '  an indented line',
+    '- a line that looks like a flag',
+    // The marker a fixed hint used to show, planted to end the heredoc early (issue #8).
+    'AB_END',
+    `touch ${canary('planted')}`,
+  ].join('\n')
+  const sh = (script: string): string => execFileSync('sh', ['-c', script], { env, encoding: 'utf8' })
+  const cli = `"${process.execPath}" "${CLI}"`
+  const receive = async (): Promise<string> => {
+    const l = start(['listen', '--as', 'sh-peer'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-sh' })
+    expect(await l.exited()).toBe(0)
+    return l.out()
+  }
+
+  it('sends the text from a quoted heredoc exactly, and runs nothing in it', async () => {
+    run(['join', '--kind', 'agy', '--no-push', 'sh-peer'], { ANTIGRAVITY_CONVERSATION_ID: 'conv-sh' })
+    const end = sendMarker()
+    expect(sh(`${cli} send sh-peer - <<'${end}'\n${BODY}\n${end}\n`)).toMatch(/Queued for sh-peer/)
+    expect(await receive()).toContain(BODY)
+    for (const c of ['tick', 'dollar', 'planted']) expect(fs.existsSync(canary(c))).toBe(false)
+  })
+
+  it('shows why: the same text in double quotes runs its commands and loses them', async () => {
+    // Guards the test itself. If the shell stopped expanding this, the heredoc test above would prove nothing.
+    sh(`${cli} send sh-peer "run \`touch ${canary('quoted')}\`"`)
+    expect(fs.existsSync(canary('quoted'))).toBe(true)
+    expect(await receive()).not.toContain('touch')
+  })
+
+  it('shows why the marker is random: a fixed one planted in the text ends the heredoc and runs the rest', async () => {
+    // `true` at the end: the shell also tries the trailing marker line as a command.
+    sh(`${cli} send sh-peer - <<'AB_END'\n${BODY}\nAB_END\ntrue\n`)
+    expect(fs.existsSync(canary('planted'))).toBe(true)
+    expect(await receive()).not.toContain(canary('planted'))
+  })
+
+  it('takes - followed by more words as literal text', async () => {
+    expect(run(['send', 'sh-peer', '-', 'and', 'more'])).toMatch(/Queued for sh-peer/)
+    expect(await receive()).toContain('- and more')
+  })
+
+  it('prints a fresh marker for agents with no hint at hand', () => {
+    const [a, b] = [run(['marker']).trim(), run(['marker']).trim()]
+    expect(a).toMatch(/^AB_END_[0-9a-f]{8}$/)
+    expect(a).not.toBe(b)
+  })
+
+  it('keeps leading indentation, as code needs it', async () => {
+    const end = sendMarker()
+    sh(`${cli} send sh-peer - <<'${end}'\n    indented first line\n\tand a tab\n${end}\n`)
+    expect(await receive()).toContain('\n    indented first line\n\tand a tab\n')
+  })
+
+  it('refuses - when stdin is a terminal instead of hanging', () => {
+    expect(H.ttyFail(['send', 'sh-peer', '-'], '')).toMatch(/stdin is a terminal/)
+  })
+
+  it('refuses empty stdin with a reason', () => {
+    expect(H.fail(['send', 'sh-peer', '-'], {}, '')).toMatch(/no message text/)
+  })
+})
+
 describe('auto names', () => {
   // run() executes in the repo folder, so the base is agent-bridge-<kind>.
   it('gives each new agy session the next free name and keeps it per session', () => {
@@ -238,7 +308,7 @@ describe('claude monitor', () => {
     await online(name)
     run(['send', name, 'first\nsecond'])
     await until(() => m.out().includes('first\\nsecond'), 'monitor line')
-    expect(m.out()).toMatch(/Reply with: agent-bridge send --as agent-bridge-claude\S* shell/)
+    expect(m.out()).toMatch(/Reply with `agent-bridge send --as agent-bridge-claude\S* shell - <<'AB_END_[0-9a-f]{8}'`/)
 
     expect(run(['join', '--kind', 'claude', 'mon-role'], env1)).toMatch(/as "mon-role"/)
     run(['send', 'mon-role', 'after rename'])

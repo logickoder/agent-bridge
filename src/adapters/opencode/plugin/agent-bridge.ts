@@ -31,17 +31,20 @@ export interface Ctx {
   session: { prompt: (p: { sessionID: string; text: string }) => Promise<unknown> }
 }
 
-/** Runs the CLI to completion and returns stdout. Rejects with stderr on failure. */
-export type Exec = (args: string[], env: NodeJS.ProcessEnv, cwd: string) => Promise<string>
+/** Runs the CLI to completion and returns stdout, writing `input` to its stdin. Rejects with stderr on failure. */
+export type Exec = (args: string[], env: NodeJS.ProcessEnv, cwd: string, input?: string) => Promise<string>
 /** Starts a long-running CLI process. */
 export type Spawn = (env: NodeJS.ProcessEnv, cwd: string) => { stdout: Readable; kill: () => void }
 
-const realExec: Exec = (args, env, cwd) =>
+const realExec: Exec = (args, env, cwd, input) =>
   new Promise((resolve, reject) => {
-    execFile(CLI, args, { env, cwd, timeout: 15_000 }, (err, stdout, stderr) => {
+    const child = execFile(CLI, args, { env, cwd, timeout: 15_000 }, (err, stdout, stderr) => {
       if (err) reject(new Error(String(stderr).trim() || err.message))
       else resolve(String(stdout).trim())
     })
+    // The CLI may exit before reading stdin (a failed join, the timeout). The broken pipe must not crash opencode.
+    child.stdin?.on('error', () => {})
+    child.stdin?.end(input ?? '')
   })
 
 const realSpawn: Spawn = (env, cwd) => {
@@ -130,7 +133,8 @@ export function createPlugin(deps: { exec: Exec; spawn: Spawn }) {
             const name = requireName(context.sessionID)
             if ((input['to'] === undefined) === (input['to_kind'] === undefined)) throw new Error('pass one of "to" or "to_kind". Name a peer, or a kind to reach the one in this folder.')
             const target = input['to_kind'] !== undefined ? ['--to-kind', String(input['to_kind'])] : [String(input['to'])]
-            const out = await deps.exec(['send', '--as', name, ...target, String(input['text'])], envFor(context.sessionID), cwd)
+            // The text goes on stdin (`-`), so a message that is itself `-` or starts like a flag stays text.
+            const out = await deps.exec(['send', '--as', name, ...target, '-'], envFor(context.sessionID), cwd, String(input['text']))
             return { content: out }
           },
         })
