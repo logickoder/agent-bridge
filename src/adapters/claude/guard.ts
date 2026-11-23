@@ -13,6 +13,14 @@ const HookInput = z.object({ permission_mode: z.string().optional(), tool_input:
 const REASON =
   'This session bypasses permission prompts, so Claude would hold every bridge message for approval, and a denied or expired one is lost. Invoke the agent-bridge:bridge-monitor skill instead; it joins in monitor mode.'
 
+/**
+ * The command with each heredoc body removed: a send's text can mention `agent-bridge join` or `--no-push` as
+ * plain words. Every other line still counts. A body with no closing marker stays, so the guard fails closed.
+ */
+export function withoutHeredocBodies(command: string): string {
+  return command.replace(/<<-?[ \t]*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?^\t*\2$/gm, ' $3')
+}
+
 export function guardDecision(stdin: string): object | undefined {
   let value: unknown
   try {
@@ -22,7 +30,7 @@ export function guardDecision(stdin: string): object | undefined {
   }
   const parsed = HookInput.safeParse(value)
   if (!parsed.success || parsed.data.permission_mode !== 'bypassPermissions') return undefined
-  const command = parsed.data.tool_input.command
+  const command = withoutHeredocBodies(parsed.data.tool_input.command)
   if (!/\bagent-bridge\s+join\b/.test(command) || /--no-push\b/.test(command)) return undefined
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: REASON } }
 }
