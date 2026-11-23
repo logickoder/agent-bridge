@@ -50,10 +50,11 @@ export function Diagram() {
       {/* One machine */}
       <div className="flex flex-col gap-4">
         <Eyebrow>On one machine</Eyebrow>
-        <div className="grid grid-cols-1 items-center md:grid-cols-[1fr_88px_1.1fr_minmax(0,1fr)]">
+        <div className="grid grid-cols-1 items-center md:grid-cols-[minmax(0,1fr)_88px_minmax(0,1.1fr)_minmax(0,1fr)]">
           <Box title="Claude Code" name="myapp-claude">
-            <code className="mt-2 rounded-md bg-term-bg px-3 py-2 text-[12.5px] text-term-text">
-              <span className="text-term-accent">›</span> send myapp-agy "ready for review"
+            {/* The way agents send: text on stdin through a quoted heredoc with a random end marker, so nothing expands. */}
+            <code className="mt-2 overflow-x-auto whitespace-pre rounded-md bg-term-bg px-3 py-2 text-[12.5px] leading-[1.6] text-term-text md:text-[11px] lg:text-[12.5px]">
+              <span className="text-term-accent">›</span> {"send myapp-agy - \\\n  <<'AB_END_7c41e2a9'\nready for review\nAB_END_7c41e2a9"}
             </code>
           </Box>
 
@@ -81,7 +82,7 @@ export function Diagram() {
           </div>
 
           <div className="grid grid-cols-2 items-start gap-3 md:flex md:items-stretch md:flex-col md:gap-4">
-            <div className="grid grid-cols-1 items-center md:grid-cols-[132px_1fr]">
+            <div className="grid grid-cols-1 items-center md:grid-cols-[minmax(56px,132px)_minmax(min-content,1fr)]">
               <Wire label={"wakes\u00a0· agentapi"} live />
               <Box
                 title="Antigravity"
@@ -94,7 +95,7 @@ export function Diagram() {
                 }
               />
             </div>
-            <div className="grid grid-cols-1 items-center md:grid-cols-[132px_1fr]">
+            <div className="grid grid-cols-1 items-center md:grid-cols-[minmax(56px,132px)_minmax(min-content,1fr)]">
               <Wire label="plugin" />
               <Box title="opencode" name="myapp-opencode" />
             </div>

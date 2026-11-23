@@ -205,9 +205,11 @@ html[data-theme='light'] {
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--mute);
+    /* Tablets narrow the wires: a label wraps inside its own wire rather than crossing the boxes. */
     @variant md {
-      max-width: none;
-      white-space: nowrap;
+      width: max-content;
+      max-width: 100%;
+      text-align: center;
       left: 50%;
       top: auto;
       bottom: calc(50% + 8px);
