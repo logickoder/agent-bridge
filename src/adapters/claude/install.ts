@@ -4,8 +4,9 @@ import { unlinkBin } from '../../lib/config.js'
 import type { InstallContext } from '../types.js'
 
 // Claude joins through a local plugin: the repo is a marketplace (.claude-plugin/marketplace.json) whose
-// plugin lives in src/adapters/claude/plugin. A local-path marketplace loads in place, so a rebuild needs
-// no reinstall. The channel launcher is opt-in now: `agent-bridge claude`, or an alias for it.
+// plugin lives in src/adapters/claude/plugin. Claude caches installed plugins by version under
+// ~/.claude/plugins/cache, so install removes any cached copy before installing to pick up hook/skill edits.
+// The channel launcher is opt-in now: `agent-bridge claude`, or an alias for it.
 
 const MARKETPLACE = 'agent-bridge'
 const PLUGIN = `agent-bridge@${MARKETPLACE}`
@@ -29,11 +30,15 @@ function removeLegacyLauncher(ctx: InstallContext): string[] {
 }
 
 export function install(ctx: InstallContext): string[] {
-  return [
-    ...removeLegacyLauncher(ctx),
-    claude(ctx, ['plugin', 'marketplace', 'add', ctx.repo], `claude    marketplace ${MARKETPLACE} (${ctx.repo})`),
-    claude(ctx, ['plugin', 'install', PLUGIN], `claude    plugin ${PLUGIN}`),
-  ]
+  // Refresh any cached copy so updated hooks/skills take effect without bumping plugin.json.
+  const removed = spawnSync(claudeBin(ctx), ['plugin', 'uninstall', PLUGIN], { encoding: 'utf8' })
+  const hadPlugin = !removed.error && removed.status === 0
+  const okLine = `claude    plugin ${PLUGIN}`
+  const marketplace = claude(ctx, ['plugin', 'marketplace', 'add', ctx.repo], `claude    marketplace ${MARKETPLACE} (${ctx.repo})`)
+  const plugin = claude(ctx, ['plugin', 'install', PLUGIN], okLine)
+  // The old copy is gone by now. Say so when the reinstall failed, so the user is not left guessing.
+  const lost = hadPlugin && plugin !== okLine ? [`claude    the installed plugin was removed first. Run \`claude plugin install ${PLUGIN}\` to restore it.`] : []
+  return [...removeLegacyLauncher(ctx), marketplace, plugin, ...lost]
 }
 
 export function uninstall(ctx: InstallContext): string[] {

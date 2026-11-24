@@ -1,6 +1,6 @@
 {
   "name": "@logickoder/agent-bridge",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Live messaging between agent CLI sessions (Claude Code, Antigravity, opencode). Each message wakes the receiving session in place.",
   "author": {
     "name": "Jeffery Orazulike",

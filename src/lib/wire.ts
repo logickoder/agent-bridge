@@ -1,4 +1,5 @@
 import type { Readable, Writable } from 'node:stream'
+import type { z } from 'zod'
 
 /** Calls `onValue` for each newline-delimited JSON value. Unparseable lines go to `onBadLine`. */
 export function onLines(stream: Readable, onValue: (value: unknown) => void, onBadLine: (line: string) => void): void {
@@ -33,4 +34,14 @@ export async function readStdin(): Promise<string> {
   process.stdin.setEncoding('utf8')
   for await (const chunk of process.stdin) buf += String(chunk)
   return buf
+}
+
+/** Parses a hook's stdin (empty counts as `{}`) against `schema`. Undefined when it is not JSON or does not match. */
+export function parseHookInput<S extends z.ZodType>(stdin: string, schema: S): z.infer<S> | undefined {
+  try {
+    const parsed = schema.safeParse(stdin.trim() ? JSON.parse(stdin) : {})
+    return parsed.success ? parsed.data : undefined
+  } catch {
+    return undefined
+  }
 }

@@ -1,10 +1,12 @@
 import { z } from 'zod'
-import type { Message } from '../../schema.js'
+import type { BridgeConfig, Message } from '../../schema.js'
 import { request } from '../../client/index.js'
+import { loadConfig, shouldAutoJoin } from '../../config.js'
 import { formatDrained } from './format.js'
 import { toError } from '../../lib/errors.js'
 import { logger } from '../../lib/log.js'
-import { readStdin, writeLine } from '../../lib/wire.js'
+import { parseHookInput, readStdin, writeLine } from '../../lib/wire.js'
+import { sessionTag } from '../../names.js'
 
 /** Hard cap so a slow or missing daemon never stalls agy. */
 const HOOK_BUDGET_MS = 1500
@@ -14,7 +16,16 @@ const log = logger('hook')
 const REJOIN =
   '[agent-bridge] Direct delivery to this session is off (the bridge daemon restarted). Run `agent-bridge join --kind agy` in the foreground to restore it, then carry on with what the user asked.'
 
-const HookInput = z.object({ conversationId: z.string().min(1).optional() }).loose()
+const AUTO_JOIN =
+  '[agent-bridge] Auto-join is enabled. Run `agent-bridge join --kind agy` once in the foreground to join the local bridge, then carry on with what the user asked.'
+
+const HookInput = z
+  .object({
+    conversationId: z.string().min(1).optional(),
+    cwd: z.string().min(1).optional(),
+    workspacePaths: z.array(z.string().min(1)).optional(),
+  })
+  .loose()
 
 /** Messages shown to this session, and how to remove them from the queue once they are printed. */
 export interface Drained {
@@ -73,5 +84,44 @@ export async function runHook(): Promise<void> {
   await print(out)
   // Not acked means shown again next turn: a duplicate, never a loss.
   await ack?.().catch((err: unknown) => log(`ack failed, messages will show again: ${toError(err).message}`))
+  process.exit(0)
+}
+
+/** What SessionStart prints for a given stdin, config, and online check. Never throws. */
+export async function sessionStartOutput(
+  stdin: string,
+  deps: { config: () => BridgeConfig; isOnline: (session: string) => Promise<boolean> },
+): Promise<object> {
+  const input = parseHookInput(stdin, HookInput)
+  if (!input?.conversationId) return {}
+  const folder = input.cwd ?? input.workspacePaths?.[0]
+  if (!shouldAutoJoin(deps.config(), folder)) return {}
+  const online = await deps.isOnline(input.conversationId).catch(() => false)
+  if (online) return {}
+  return { injectSteps: [{ userMessage: AUTO_JOIN }] }
+}
+
+/**
+ * agy SessionStart hook. Asks agy to run `join --kind agy` once when auto-join is enabled for this folder.
+ * Hooks do not receive ANTIGRAVITY_LS_ADDRESS or ANTIGRAVITY_CSRF_TOKEN, so join must run via run_command.
+ */
+export async function runSessionStart(): Promise<void> {
+  let printed = false
+  const print = (out: object): Promise<void> => {
+    if (printed) return Promise.resolve()
+    printed = true
+    return new Promise(resolve => writeLine(process.stdout, out, resolve))
+  }
+  setTimeout(() => void print({}).then(() => process.exit(0)), HOOK_BUDGET_MS).unref()
+  const out = await sessionStartOutput(await readStdin(), {
+    config: loadConfig,
+    isOnline: async session => {
+      const { peers } = await request({ op: 'status' }, 'status', { spawnDaemon: false })
+      const tag = sessionTag(session)
+      return peers.some(p => p.session === tag && p.online)
+    },
+  })
+  if (printed) return process.exit(0)
+  await print(out)
   process.exit(0)
 }

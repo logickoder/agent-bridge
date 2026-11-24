@@ -25,7 +25,8 @@ const USAGE = [
   '  whoami                         this session\'s peer name(s), from the agent\'s session id',
   '  marker                         a random heredoc end marker, for `send ... - <<\'<marker>\'`',
   '  send [--as me] <to|--to-kind k> <text...|->  send; - reads the text from stdin; --to-kind: the one online peer of that kind in this folder',
-  '  leave <name>                   unbind a peer and stop its listeners',
+  '  leave [name | --session id]    unbind a peer and stop its listeners (no arg: this session)',
+  '  auto-join [on|off|ignore|unignore]  auto-join live sessions (with optional folder ignore list)',
   '  net host|invite|connect|status|share|unshare|verify|...  networks across machines: `agent-bridge net help`',
   '  restart                        stop the daemon; the next client starts the new one',
   `  mcp <kind>                     MCP server for one agent kind: ${adapters.map(a => a.kind).join(', ')}`,
@@ -131,7 +132,33 @@ async function main(argv: string[]): Promise<void> {
       return (await import('./net/keeper.js')).runKeeper(args)
     case 'net':
       return (await import('./net/cli.js')).runNet(args, { sessions: () => envSessions().map(s => s.id), out, confirm: askTerminal })
+    case 'auto-join': {
+      const { formatAutoJoin, ignoreAutoJoinFolder, loadConfig, saveConfig, setAutoJoin, unignoreAutoJoinFolder } = await import('./config.js')
+      const cfg = loadConfig()
+      const sub = args[0]
+      if (!sub) return out(formatAutoJoin(cfg))
+      const folder = args[1] ?? process.cwd()
+      const updates: Record<string, () => typeof cfg> = {
+        on: () => setAutoJoin(cfg, true),
+        off: () => setAutoJoin(cfg, false),
+        ignore: () => ignoreAutoJoinFolder(cfg, folder),
+        unignore: () => unignoreAutoJoinFolder(cfg, folder),
+      }
+      const update = updates[sub]
+      if (!update) throw new Error(`unknown auto-join command "${sub}". Use on, off, ignore [folder], or unignore [folder].`)
+      const next = update()
+      saveConfig(next)
+      return out(formatAutoJoin(next))
+    }
     case 'leave': {
+      const sessionFlag = takeFlag(args, '--session')
+      if (sessionFlag !== undefined || args[0] === undefined) {
+        const [only, ...rest] = envSessions()
+        const session = sessionFlag !== undefined ? sessionFlag.trim() : only && !rest.length ? only.id : ''
+        if (!session) throw new Error(sessionFlag !== undefined ? 'leave --session needs a non-empty session id.' : 'leave needs a peer name, or --session <id>. Pass the name from `agent-bridge whoami`.')
+        await request({ op: 'leave', session }, 'ok')
+        return out('Left agent-bridge. Listeners exited and the binding is released.')
+      }
       const name = peerName(args[0], 'Peer name')
       await request({ op: 'leave', as: name }, 'ok')
       return out(`"${name}" left. Its listeners exited and the binding is released.`)

@@ -7,6 +7,9 @@
 // idle session.
 
 import { execFile, spawn as spawnChild } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { createInterface } from 'node:readline'
 import type { Readable } from 'node:stream'
 
@@ -29,6 +32,57 @@ export interface Ctx {
   location: { directory: string }
   tool: { transform: (fn: (editor: { add: (tool: Tool) => void }) => void) => Promise<unknown> }
   session: { prompt: (p: { sessionID: string; text: string }) => Promise<unknown> }
+  event?: { subscribe: (options?: { types?: string[]; signal?: AbortSignal }) => AsyncIterable<unknown> }
+}
+
+/** Resolves symlinks where the path exists, like `normalizeFolder` in src/config.ts, so ignore entries match across agents. */
+function realFolder(dir: string): string {
+  const resolved = path.resolve(dir)
+  try {
+    return fs.realpathSync(resolved)
+  } catch {
+    return resolved
+  }
+}
+
+/** Returns whether auto-join is enabled for `dir`, reading `~/.agent-bridge/config.json` directly. */
+export function shouldAutoJoinFromFile(dir: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  // Same home as src/paths.ts. The plugin is standalone (node built-ins only), so it cannot import it.
+  const home = env['AGENT_BRIDGE_HOME'] ?? path.join(os.homedir(), '.agent-bridge')
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8')) as unknown
+    if (typeof raw !== 'object' || raw === null) return false
+    const autoJoin: unknown = Reflect.get(raw, 'autoJoin')
+    if (typeof autoJoin !== 'object' || autoJoin === null) return false
+    if (Reflect.get(autoJoin, 'enabled') !== true) return false
+    const ignore: unknown = Reflect.get(autoJoin, 'ignore')
+    if (!Array.isArray(ignore)) return true
+    const target = realFolder(dir)
+    return !ignore.some(item => typeof item === 'string' && realFolder(item) === target)
+  } catch {
+    return false
+  }
+}
+
+const errMsg = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+const logErr = (msg: string): void => {
+  process.stderr.write(`[agent-bridge] ${msg}\n`)
+}
+
+/** Extracts `type`, `sessionID`, `isChild`, and optional `directory` from an opencode v2 event. */
+function parseSessionEvent(value: unknown): { type: string; sessionID: string; isChild: boolean; directory?: string } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const type: unknown = Reflect.get(value, 'type')
+  const data: unknown = Reflect.get(value, 'data')
+  if (typeof type !== 'string' || typeof data !== 'object' || data === null) return undefined
+  const sessionID: unknown = Reflect.get(data, 'sessionID')
+  if (typeof sessionID !== 'string' || !sessionID) return undefined
+  const parent: unknown = Reflect.get(data, 'parentID') ?? Reflect.get(data, 'parentSessionID')
+  const isChild = typeof parent === 'string' && parent.length > 0
+  const loc: unknown = Reflect.get(value, 'location') ?? Reflect.get(data, 'location')
+  const dir: unknown = typeof loc === 'object' && loc !== null ? Reflect.get(loc, 'directory') : undefined
+  return typeof dir === 'string' ? { type, sessionID, isChild, directory: dir } : { type, sessionID, isChild }
 }
 
 /** Runs the CLI to completion and returns stdout, writing `input` to its stdin. Rejects with stderr on failure. */
@@ -60,7 +114,7 @@ const StreamLine = (value: unknown): { type: string; text: string } | undefined 
   return typeof type === 'string' && typeof text === 'string' ? { type, text } : undefined
 }
 
-export function createPlugin(deps: { exec: Exec; spawn: Spawn }) {
+export function createPlugin(deps: { exec: Exec; spawn: Spawn; shouldAutoJoin?: (dir: string) => boolean }) {
   return {
     id: 'agent-bridge',
     async setup(ctx: Ctx) {
@@ -68,6 +122,7 @@ export function createPlugin(deps: { exec: Exec; spawn: Spawn }) {
       const streams = new Map<string, () => void>()
       const envFor = (sessionID: string): NodeJS.ProcessEnv => ({ ...process.env, [SESSION_ENV]: sessionID })
       const cwd = ctx.location.directory
+      const autoJoinCheck = deps.shouldAutoJoin ?? (dir => shouldAutoJoinFromFile(dir))
 
       const startStream = (sessionID: string): void => {
         if (streams.has(sessionID)) return
@@ -87,10 +142,53 @@ export function createPlugin(deps: { exec: Exec; spawn: Spawn }) {
         })
       }
 
+      const joinSession = async (sessionID: string, args: string[] = []): Promise<string> => {
+        const out = await deps.exec(['join', '--kind', 'opencode', ...args], envFor(sessionID), cwd)
+        const name = /Joined agent-bridge as "([^"]+)"/.exec(out)?.[1]
+        if (name) names.set(sessionID, name)
+        startStream(sessionID)
+        return out
+      }
+
       const requireName = (sessionID: string): string => {
         const name = names.get(sessionID)
         if (!name) throw new Error('not on agent-bridge yet. Call bridge_join first.')
         return name
+      }
+
+      const ac = new AbortController()
+      if (ctx.event?.subscribe) {
+        const stream = ctx.event.subscribe({ types: ['session.created', 'session.deleted'], signal: ac.signal })
+        void (async () => {
+          try {
+            for await (const raw of stream) {
+              const ev = parseSessionEvent(raw)
+              if (!ev) continue
+              if (ev.type === 'session.created') {
+                if (ev.isChild) continue
+                // Without the session's folder the plugin's own would be recorded, which can be another project's.
+                if (!ev.directory) {
+                  if (autoJoinCheck(cwd)) logErr('auto-join skipped: the session.created event has no directory.')
+                  continue
+                }
+                if (realFolder(ev.directory) !== realFolder(cwd)) continue
+                if (names.has(ev.sessionID) || !autoJoinCheck(cwd)) continue
+                await joinSession(ev.sessionID).catch((err: unknown) => logErr(`auto-join failed: ${errMsg(err)}`))
+              } else if (ev.type === 'session.deleted') {
+                if (ev.directory && realFolder(ev.directory) !== realFolder(cwd)) continue
+                if (!streams.has(ev.sessionID) && !names.has(ev.sessionID)) continue
+                streams.get(ev.sessionID)?.()
+                streams.delete(ev.sessionID)
+                names.delete(ev.sessionID)
+                await deps.exec(['leave', '--session', ev.sessionID], envFor(ev.sessionID), cwd).catch((err: unknown) =>
+                  logErr(`auto-leave failed: ${errMsg(err)}`),
+                )
+              }
+            }
+          } catch (err) {
+            if (!ac.signal.aborted) logErr(`event stream ended: ${errMsg(err)}`)
+          }
+        })()
       }
 
       await ctx.tool.transform(editor => {
@@ -107,12 +205,8 @@ export function createPlugin(deps: { exec: Exec; spawn: Spawn }) {
             additionalProperties: false,
           },
           execute: async (input, context) => {
-            const args = ['join', '--kind', 'opencode', ...(input['take'] === true ? ['--take'] : []), ...(typeof input['name'] === 'string' ? [input['name']] : [])]
-            const out = await deps.exec(args, envFor(context.sessionID), cwd)
-            const name = /Joined agent-bridge as "([^"]+)"/.exec(out)?.[1]
-            if (name) names.set(context.sessionID, name)
-            startStream(context.sessionID)
-            return { content: out }
+            const extra = [...(input['take'] === true ? ['--take'] : []), ...(typeof input['name'] === 'string' ? [input['name']] : [])]
+            return { content: await joinSession(context.sessionID, extra) }
           },
         })
         editor.add({
@@ -170,6 +264,7 @@ export function createPlugin(deps: { exec: Exec; spawn: Spawn }) {
       })
 
       return () => {
+        ac.abort()
         for (const kill of streams.values()) kill()
       }
     },

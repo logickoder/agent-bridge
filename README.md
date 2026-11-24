@@ -15,7 +15,7 @@ agent-bridge install              # once per machine, and again after each updat
 
 From source: `git clone https://github.com/logickoder/agent-bridge.git`, then `pnpm install && pnpm build && node dist/cli.js install`.
 
-Then join from each session: `/bridge` in Claude Code or Antigravity, or ask opencode to join the bridge. Without a name you get `<folder>-<kind>` (e.g. `myapp-claude`); `/bridge planner` picks one. Ask any session to message another by name. `/bridge <new name>` renames, `/bridge off` leaves. `agent-bridge uninstall` removes everything.
+Then join from each session: `/bridge` in Claude Code or Antigravity, or ask opencode to join the bridge. Or run `agent-bridge auto-join on` once to join live sessions automatically (with `auto-join ignore [folder]` to skip noisy folders; see [docs/install.md](docs/install.md#auto-join)). Without a name you get `<folder>-<kind>` (e.g. `myapp-claude`); `/bridge planner` picks one. Ask any session to message another by name. `/bridge <new name>` renames, `/bridge off` leaves. `agent-bridge uninstall` removes everything.
 
 Requires Node 22+ (and pnpm to build from source).
 
@@ -56,13 +56,14 @@ Delivery is at least once: a message leaves the queue only when it is acked. Sen
 | `agent-bridge send [--as me] <to> <text>` | Send. Without `--as`, the sender is `shell`, unverified. Pass `-` as the text to read it from stdin |
 | `agent-bridge send [--as me] --to-kind <kind> <text>` | Send to the one online peer of that kind that joined from this folder. Refuses if there are none or several |
 | `agent-bridge marker` | A random heredoc end marker, for agents sending with `send ... - <<'<marker>'` |
-| `agent-bridge leave <name>` | Unbind a peer and stop its listeners |
+| `agent-bridge leave [name \| --session id]` | Unbind a peer and stop its listeners (no arg: this session) |
+| `agent-bridge auto-join [on\|off\|ignore\|unignore]` | Auto-join live sessions to the local bridge, with an optional folder ignore list ([docs/install.md](docs/install.md#auto-join)) |
 | `agent-bridge status` | Everything, as JSON. Session ids show as tags |
 | `agent-bridge restart` | Stop the daemon. The next client starts it |
 | `agent-bridge claude [--as name] [claude args]` | Launch Claude Code with a channel instead of the socket |
 | `agent-bridge net <sub>` | Networks across machines: `host`, `invite`, `connect`, `status`, `fingerprint`, `verify`, `trust`, `allow`, `share`, `kick`, `set-url`, `leave`, `stop`. `agent-bridge net` lists them |
 
-Agent-side commands, called by skills, hooks and plugins: `listen`, `agy-hook`, `monitor`, `claude-guard`, `opencode-stream`, `mcp <kind>`, `daemon`. `agent-bridge` with no arguments lists them all.
+Agent-side commands, called by skills, hooks and plugins: `listen`, `agy-hook`, `agy-session-start`, `monitor`, `claude-guard`, `claude-session-start`, `claude-session-end`, `opencode-stream`, `mcp <kind>`, `daemon`. `agent-bridge` with no arguments lists them all.
 
 ## Development
 

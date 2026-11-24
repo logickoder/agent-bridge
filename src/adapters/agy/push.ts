@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import net from 'node:net'
 import path from 'node:path'
 import { z } from 'zod'
 import type { Message } from '../../schema.js'
@@ -66,3 +67,42 @@ export const deliverWith =
   }
 
 export const deliver = deliverWith(runProcess)
+
+const PROBE_TIMEOUT_MS = 200
+
+/** Parses `host:port` (including IPv6 `[::1]:port`) from `ANTIGRAVITY_LS_ADDRESS`. */
+export function parseAddress(address: string): { host: string; port: number } | undefined {
+  const m = /^(?:\[([^\]]+)\]|([^:]+)):(\d+)$/.exec(address.trim())
+  if (!m) return undefined
+  const host = m[1] ?? m[2]
+  const port = Number(m[3])
+  if (!host || !Number.isInteger(port) || port < 1 || port > 65535) return undefined
+  return { host, port }
+}
+
+export type ProbeConnect = (host: string, port: number) => Promise<boolean>
+
+const tcpAlive: ProbeConnect = (host, port) =>
+  new Promise(resolve => {
+    const sock = net.createConnection({ host, port })
+    const done = (ok: boolean) => {
+      clearTimeout(timer)
+      sock.destroy()
+      resolve(ok)
+    }
+    const timer = setTimeout(() => done(false), PROBE_TIMEOUT_MS)
+    sock.once('connect', () => done(true))
+    sock.once('error', () => done(false))
+  })
+
+/** True if the session's local agentapi port is still accepting connections. Never persists credentials. */
+export const aliveWith =
+  (connect: ProbeConnect) =>
+  async (endpoint: Record<string, string>): Promise<boolean> => {
+    const addr = endpoint['address']
+    const parsed = addr ? parseAddress(addr) : undefined
+    if (!parsed) return false
+    return connect(parsed.host, parsed.port)
+  }
+
+export const alive = aliveWith(tcpAlive)

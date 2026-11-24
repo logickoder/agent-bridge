@@ -31,10 +31,15 @@ export interface Adapter {
   /** A push endpoint from the agent's environment, registered by `join`. Absent: the agent receives by listening. */
   pushEndpoint?: (env: NodeJS.ProcessEnv) => Promise<Record<string, string> | undefined>
   /**
-   * True if an endpoint still reaches its session. Set it only when the endpoint holds no credential: the daemon
-   * then saves the endpoint, restores it after a restart, and drops it at start if this says it is gone.
+   * True if an endpoint still reaches its session. Used by the daemon to drop dead push endpoints on demand,
+   * on a slow network-presence timer, and when restoring saved endpoints at start.
    */
   alive?: (endpoint: Record<string, string>) => Promise<boolean>
+  /**
+   * True only when the push endpoint holds no credential and is safe to save to disk (`endpoints.json`)
+   * so it survives a daemon restart. Requires `alive`.
+   */
+  persistEndpoint?: boolean
   /** Pushes one message through an endpoint from pushEndpoint. Runs in the daemon. */
   deliver?: (endpoint: Record<string, string>, msg: Message) => Promise<void>
   /** `agent-bridge mcp <kind>`: the MCP server this agent's client launches. */

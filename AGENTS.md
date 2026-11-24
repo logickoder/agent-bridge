@@ -7,6 +7,7 @@
 | `src/cli.ts` | Entry. Core commands, then adapter commands from the registry |
 | `src/install.ts` | Links `agent-bridge`, then runs each adapter's install or uninstall |
 | `src/paths.ts` | State locations (`~/.agent-bridge`) and `ensureHome` |
+| `src/config.ts` | Opt-in user preferences (`~/.agent-bridge/config.json`: auto-join and folder ignore list) |
 | `src/schema.ts` | Zod schemas for every boundary: socket requests and replies, messages, peers |
 | `src/names.ts` | Auto peer names: `<folder>-<kind>` base, next free suffix. Pure |
 | `src/format.ts` | Send results, shared by the tools and the CLI. Agent-specific wording lives in the adapter (`agy/format.ts`) |
@@ -22,7 +23,7 @@
 | `src/lib/` | Generic helpers, no bridge logic: `errors` (errno codes, `toError`, `isDaemonDown`), `json-file` (validated read, atomic write, `readJsonDir`), `log` (tagged stderr), `wire` (JSON lines), `args`, `config` (other tools' config and PATH links), `rate` (token bucket), `tty` (ask on a terminal; undefined without one) |
 | `src/adapters/types.ts` | The `Adapter` interface every agent kind implements |
 | `src/adapters/index.ts` | `ADAPTERS` registry, typed `Record<PeerKind, Adapter>` |
-| `src/adapters/<kind>/` | Everything agent-specific. `index.ts` exports the adapter and is the folder's only entry point. The rest is split by concern: `mcp.ts`, `install.ts`, `names.ts` (constants), and the wake path (`agy/push.ts`, `agy/listen.ts`, `agy/hook.ts`, `agy/format.ts`, `claude/socket.ts`, `claude/monitor.ts`, `claude/format.ts`, `claude/channel/`) |
+| `src/adapters/<kind>/` | Everything agent-specific. `index.ts` exports the adapter and is the folder's only entry point. The rest is split by concern: `mcp.ts`, `install.ts`, `names.ts` (constants), and the wake path (`agy/push.ts`, `agy/listen.ts`, `agy/hook.ts`, `agy/format.ts`, `claude/socket.ts`, `claude/session.ts`, `claude/monitor.ts`, `claude/format.ts`, `claude/channel/`) |
 | `src/adapters/agy/skill/` | The Antigravity `/bridge` skill, copied by install |
 | `src/adapters/opencode/plugin/` | The opencode plugin. Standalone (node built-ins only): install copies the built file into opencode's plugins folder |
 | `src/adapters/claude/plugin/` | The Claude plugin: `/bridge` (socket) and `/bridge-monitor` skills sharing `shared/peer-messages.md`, the monitor, and the bypass-guard hook. Registered by install through the repo's `.claude-plugin/marketplace.json` |

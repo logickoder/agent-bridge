@@ -19,6 +19,8 @@ export const agy: Adapter = {
   joinHint: 'Antigravity: type `/bridge [name]`.',
   sessionEnv: SESSION_ENV,
   joined: async (name, pushed) => (await import('./format.js')).joinedText(name, pushed),
+  // Never set persistEndpoint: agy endpoints carry a CSRF token and stay in daemon memory only.
+  alive: async endpoint => (await import('./push.js')).alive(endpoint),
   pushEndpoint: async env => (await import('./push.js')).endpointFromEnv(env),
   deliver: async (endpoint, msg) => (await import('./push.js')).deliver(endpoint, msg),
   serveMcp: async () => (await import('./mcp.js')).serveAgyMcp(),
@@ -36,6 +38,10 @@ export const agy: Adapter = {
     'agy-hook': {
       usage: 'agy-hook                       agy PreInvocation hook',
       run: async () => (await import('./hook.js')).runHook(),
+    },
+    'agy-session-start': {
+      usage: 'agy-session-start              agy SessionStart hook, asks agy to join when auto-join is on',
+      run: async () => (await import('./hook.js')).runSessionStart(),
     },
   },
   install: async ctx => (await import('./install.js')).install(ctx),

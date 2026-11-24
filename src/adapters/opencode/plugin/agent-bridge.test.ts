@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createPlugin, type Exec, type Spawn, type Tool } from './agent-bridge.js'
 
 /** A fake opencode ctx: records registered tools and prompts. */
@@ -89,5 +89,68 @@ describe('opencode plugin', () => {
       ['net', 'unshare', 'proj-opencode'],
     ])
     expect(execs[1]?.env['OPENCODE_SESSION_ID']).toBe('ses_1')
+  })
+
+  it('auto-joins on session.created and auto-leaves on session.deleted when enabled', async () => {
+    const execs: { args: string[]; env: NodeJS.ProcessEnv; cwd: string }[] = []
+    const exec: Exec = async (args, env, cwd) => {
+      execs.push({ args, env, cwd })
+      return args[0] === 'join' ? 'Joined agent-bridge as "proj-opencode".' : 'ok'
+    }
+    let killed = 0
+    const spawn: Spawn = () => ({ stdout: new PassThrough(), kill: () => void killed++ })
+    const events = [
+      { type: 'session.created', location: { directory: '/p/other' }, data: { sessionID: 'ses_other' } },
+      { type: 'session.created', data: { sessionID: 'ses_nodir' } },
+      { type: 'session.created', location: { directory: '/p/proj' }, data: { sessionID: 'ses_child', parentID: 'ses_auto' } },
+      { type: 'session.created', location: { directory: '/p/proj' }, data: { sessionID: 'ses_auto' } },
+      { type: 'session.deleted', location: { directory: '/p/proj' }, data: { sessionID: 'ses_auto' } },
+    ]
+    const f = fakeCtx()
+    const ctx = {
+      ...f.ctx,
+      event: {
+        subscribe: async function* () {
+          for (const ev of events) yield ev
+        },
+      },
+    }
+    await createPlugin({ exec, spawn, shouldAutoJoin: () => true }).setup(ctx)
+    await new Promise(r => setTimeout(r, 20))
+    expect(execs.map(e => [e.args, e.env['OPENCODE_SESSION_ID']])).toEqual([
+      [['join', '--kind', 'opencode'], 'ses_auto'],
+      [['leave', '--session', 'ses_auto'], 'ses_auto'],
+    ])
+    expect(killed).toBe(1)
+  })
+
+  it('logs when a session.created has no directory and auto-join is on, and stays quiet when it is off', async () => {
+    const written: string[] = []
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      written.push(String(chunk))
+      return true
+    })
+    try {
+      for (const enabled of [true, false]) {
+        written.length = 0
+        const exec: Exec = async () => 'Joined agent-bridge as "proj-opencode".'
+        const spawn: Spawn = () => ({ stdout: new PassThrough(), kill: () => {} })
+        const f = fakeCtx()
+        const ctx = {
+          ...f.ctx,
+          event: {
+            subscribe: async function* () {
+              yield { type: 'session.created', data: { sessionID: 'ses_nodir' } }
+            },
+          },
+        }
+        await createPlugin({ exec, spawn, shouldAutoJoin: () => enabled }).setup(ctx)
+        await new Promise(r => setTimeout(r, 20))
+        const logged = written.filter(line => line.includes('session.created event has no directory'))
+        expect(logged).toHaveLength(enabled ? 1 : 0)
+      }
+    } finally {
+      stderr.mockRestore()
+    }
   })
 })
