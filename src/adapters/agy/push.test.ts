@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../../schema.js'
-import { deliverWith, endpointFromEnv, type Run } from './push.js'
+import { aliveWith, deliverWith, endpointFromEnv, parseAddress, type Run } from './push.js'
 
 const env = {
   ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:1',
@@ -49,5 +49,29 @@ describe('deliverWith', () => {
     const run: Run = async () => ({ code: 0, stdout: '{}' })
     await expect(deliverWith(run)({ ...endpoint, agy: '/tmp/evil' }, msg)).rejects.toThrow(/only runs agy/)
     await expect(deliverWith(run)({ ...endpoint, agy: 'agy' }, msg)).rejects.toThrow(/absolute path/)
+  })
+})
+
+describe('parseAddress and aliveWith', () => {
+  it('parses host:port and IPv6 addresses and rejects invalid ones', () => {
+    expect(parseAddress('localhost:59106')).toEqual({ host: 'localhost', port: 59106 })
+    expect(parseAddress('[::1]:8080')).toEqual({ host: '::1', port: 8080 })
+    expect(parseAddress('localhost:0')).toBeUndefined()
+    expect(parseAddress('not-an-address')).toBeUndefined()
+  })
+
+  it('probes the parsed host and port', async () => {
+    const seen: [string, number][] = []
+    const alive = aliveWith(async (host, port) => {
+      seen.push([host, port])
+      return port === 59106
+    })
+    expect(await alive({ address: 'localhost:59106' })).toBe(true)
+    expect(await alive({ address: 'localhost:9999' })).toBe(false)
+    expect(await alive({})).toBe(false)
+    expect(seen).toEqual([
+      ['localhost', 59106],
+      ['localhost', 9999],
+    ])
   })
 })

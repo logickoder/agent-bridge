@@ -29,7 +29,11 @@ export function install(ctx: InstallContext): string[] {
   writeObject(f.mcp, { ...mcp, mcpServers: { ...mcp.mcpServers, [GROUP]: { command: ctx.exe, args: ['mcp', 'agy'], disabled: false } } })
 
   const hooks = readObject(f.hooks, JsonObject) ?? {}
-  hooks[GROUP] = { enabled: true, PreInvocation: [{ type: 'command', command: `${ctx.exe} agy-hook`, timeout: HOOK_TIMEOUT_S }] }
+  hooks[GROUP] = {
+    enabled: true,
+    SessionStart: [{ type: 'command', command: `${ctx.exe} agy-session-start`, timeout: HOOK_TIMEOUT_S }],
+    PreInvocation: [{ type: 'command', command: `${ctx.exe} agy-hook`, timeout: HOOK_TIMEOUT_S }],
+  }
   writeObject(f.hooks, hooks)
 
   fs.rmSync(f.skillDst, { recursive: true, force: true })

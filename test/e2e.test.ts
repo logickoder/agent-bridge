@@ -596,6 +596,23 @@ describe('install', () => {
     expect(fs.readlinkSync(npmLink)).toBe(path.relative(npmBin, fs.realpathSync(CLI)))
   })
 
+  it('says the plugin was removed when the reinstall fails after a successful uninstall', () => {
+    const binDir = path.join(HOME, 'bin-lost')
+    const fakeClaude = path.join(HOME, 'fake-claude-lost')
+    // Uninstall succeeds, so a plugin was there. Install fails.
+    fs.writeFileSync(fakeClaude, '#!/bin/sh\n[ "$1 $2" = "plugin install" ] && { echo "boom" >&2; exit 1; }\nexit 0\n', { mode: 0o755 })
+    const targets = {
+      PATH: '/usr/bin:/bin',
+      AGENT_BRIDGE_BIN_DIR: binDir,
+      AGENT_BRIDGE_CLAUDE_BIN: fakeClaude,
+      AGY_CONFIG_DIR: path.join(HOME, 'agy-lost'),
+      OPENCODE_CONFIG_DIR: path.join(HOME, 'opencode-lost'),
+    }
+    const output = run(['install'], targets)
+    expect(output).toMatch(/failed: boom/)
+    expect(output).toContain('Run `claude plugin install agent-bridge@agent-bridge` to restore it.')
+  })
+
   it('adds and removes only agent-bridge entries, idempotently', () => {
     const agyDir = path.join(HOME, 'agy')
     const binDir = path.join(HOME, 'bin')
@@ -659,5 +676,65 @@ describe('network sharing', () => {
 
   it('refuses to share from a plain shell', () => {
     expect(() => run(['net', 'share', 'net-coder'])).toThrow(/No agent session id/)
+  })
+})
+
+describe('auto-join, auto-leave and liveness', () => {
+  it('toggles auto-join config, runs claude SessionStart/SessionEnd and agy SessionStart, and drops dead sockets on status', async () => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ab-auto-')))
+    const ignored = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ab-ign-')))
+    const runWithInput = (args: string[], input: string, extra: Record<string, string> = {}) =>
+      execFileSync(process.execPath, [CLI, ...args], { env: { ...env, ...extra }, input, encoding: 'utf8', cwd: dir })
+
+    expect(run(['auto-join'])).toMatch(/auto-join: off/)
+    expect(run(['auto-join', 'on'])).toMatch(/auto-join: on/)
+    expect(run(['auto-join', 'ignore', ignored])).toContain(ignored)
+
+    // Claude SessionStart auto-joins in a non-ignored folder with a live inbox socket.
+    const sockPath = path.join(dir, 'inbox.sock')
+    const srv = net.createServer().listen(sockPath)
+    await new Promise<void>(r => srv.once('listening', () => r()))
+    const claudeEnv = { CLAUDE_CODE_SESSION_ID: 'auto-c1', CLAUDE_CODE_MESSAGING_SOCKET: sockPath }
+    const startOut = runWithInput(['claude-session-start'], JSON.stringify({ session_id: 'auto-c1', cwd: dir }), claudeEnv)
+    expect(startOut).toContain('Auto-joined agent-bridge')
+    const joinedName = /Auto-joined agent-bridge as \\"([^\\"]+)\\"/.exec(startOut)?.[1]
+    expect(joinedName).toBeTruthy()
+    expect(status().peers.find(p => p.name === joinedName)?.online).toBe(true)
+
+    // Ignored folder does not auto-join.
+    expect(runWithInput(['claude-session-start'], JSON.stringify({ session_id: 'auto-c2', cwd: ignored }), { CLAUDE_CODE_SESSION_ID: 'auto-c2', CLAUDE_CODE_MESSAGING_SOCKET: sockPath })).toBe('')
+
+    // Antigravity SessionStart injects the join prompt for non-ignored folders.
+    const agyOut = JSON.parse(runWithInput(['agy-session-start'], JSON.stringify({ conversationId: 'auto-a1', cwd: dir }))) as {
+      injectSteps?: { userMessage: string }[]
+    }
+    expect(agyOut.injectSteps?.[0]?.userMessage).toContain('agent-bridge join --kind agy')
+    expect(JSON.parse(runWithInput(['agy-session-start'], JSON.stringify({ conversationId: 'auto-a2', cwd: ignored })))).toEqual({})
+
+    // Closing the Claude socket drops it offline automatically on the next status/peers sweep.
+    await new Promise<void>(r => srv.close(() => r()))
+    fs.rmSync(sockPath, { force: true })
+    await until(() => status().peers.find(p => p.name === joinedName)?.online === false, 'dead socket reaped')
+
+    // Re-register with a fresh socket and verify SessionEnd unbinds it immediately.
+    const sock2 = path.join(dir, 'inbox2.sock')
+    const srv2 = net.createServer().listen(sock2)
+    await new Promise<void>(r => srv2.once('listening', () => r()))
+    runWithInput(['claude-session-start'], JSON.stringify({ session_id: 'auto-c1', cwd: dir }), {
+      CLAUDE_CODE_SESSION_ID: 'auto-c1',
+      CLAUDE_CODE_MESSAGING_SOCKET: sock2,
+    })
+    expect(status().peers.find(p => p.name === joinedName)?.online).toBe(true)
+    runWithInput(['claude-session-end'], JSON.stringify({ session_id: 'auto-c1' }), { CLAUDE_CODE_SESSION_ID: 'auto-c1' })
+    const afterEnd = status().peers.find(p => p.name === joinedName)
+    expect(afterEnd?.online).toBe(false)
+    expect(afterEnd?.session).toBeNull()
+    await new Promise<void>(r => srv2.close(() => r()))
+
+    // Reset auto-join off so other tests stay unaffected.
+    expect(run(['auto-join', 'unignore', ignored])).not.toContain(ignored)
+    expect(run(['auto-join', 'off'])).toMatch(/auto-join: off/)
+    fs.rmSync(dir, { recursive: true, force: true })
+    fs.rmSync(ignored, { recursive: true, force: true })
   })
 })

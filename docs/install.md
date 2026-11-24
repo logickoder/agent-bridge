@@ -5,13 +5,28 @@
 | Target | Change |
 |---|---|
 | `/opt/homebrew/bin` (or `/usr/local/bin`, `~/.local/bin`) | Symlinks `agent-bridge` to `dist/cli.js`, unless an `agent-bridge` from this package is already on PATH (an npm global install). Uninstall removes only a link install made. Also removes a `claude-bridge` link from older installs |
-| Claude Code plugins | `claude plugin marketplace add <repo>` and `claude plugin install agent-bridge@agent-bridge`. The repo is a local marketplace (`.claude-plugin/marketplace.json`); the plugin lives in `src/adapters/claude/plugin/` and loads in place |
+| Claude Code plugins | `claude plugin marketplace add <repo>` and `claude plugin install agent-bridge@agent-bridge` (refreshing any cached copy so updated hooks and skills take effect). The repo is a local marketplace (`.claude-plugin/marketplace.json`); the plugin lives in `src/adapters/claude/plugin/` |
 | `~/.gemini/config/mcp_config.json` | Adds the `agent-bridge` server. Other servers untouched |
-| `~/.gemini/config/hooks.json` | Adds the `agent-bridge` hook group (PreInvocation). Other groups untouched |
+| `~/.gemini/config/hooks.json` | Adds the `agent-bridge` hook group (`SessionStart`, `PreInvocation`). Other groups untouched |
 | `~/.gemini/config/skills/bridge/` | Copies the Antigravity `/bridge` skill from `src/adapters/agy/skill/` |
 | `~/.config/opencode/plugins/agent-bridge.js` | Copies the built opencode plugin. Restart opencode to load it |
 
 To pause the Antigravity hook, set `"enabled": false` on the `agent-bridge` group in `hooks.json`.
+
+## Auto-join
+
+Auto-join is off by default. Turn it on once to join live sessions to the local bridge automatically (saved in `~/.agent-bridge/config.json`):
+
+```sh
+agent-bridge auto-join on
+agent-bridge auto-join ignore /path/to/scratch   # skip noisy folders (exact match)
+agent-bridge auto-join off
+```
+
+- **Claude Code:** joins silently on `SessionStart` and leaves on `SessionEnd`.
+- **opencode:** joins silently on `session.created` and leaves on `session.deleted`.
+- **Antigravity:** `SessionStart` prompts `agy` to run `agent-bridge join --kind agy` on its first turn (hooks do not receive the agentapi address or token). Antigravity has no `SessionEnd` hook; the daemon probes its local `ANTIGRAVITY_LS_ADDRESS` port to drop exited CLI sessions. In the IDE or desktop app where one language server serves multiple conversations, a closed conversation stays listed online until that language server exits.
+- Auto-join only joins the local bridge. Network sharing (`/bridge share`) stays opt-in per session.
 
 ## Environment overrides
 

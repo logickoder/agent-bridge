@@ -16,6 +16,7 @@ export const claude: Adapter = {
   sessionEnv: SESSION_ENV,
   joined: async (name, pushed) => (await import('./format.js')).joinedText(name, pushed),
   // Only the socket path, never the messaging token: safe to keep on disk across daemon restarts.
+  persistEndpoint: true,
   alive: async endpoint => (await import('./socket.js')).alive(endpoint),
   pushEndpoint: async env => (await import('./socket.js')).endpointFromEnv(env),
   deliver: async (endpoint, msg) => (await import('./socket.js')).deliver(endpoint, msg),
@@ -27,6 +28,14 @@ export const claude: Adapter = {
     'claude-guard': {
       usage: 'claude-guard                   claude: plugin PreToolUse hook, keeps bypass-mode sessions off the socket',
       run: async () => (await import('./guard.js')).runGuard(),
+    },
+    'claude-session-start': {
+      usage: 'claude-session-start           claude: plugin SessionStart hook, auto-joins when enabled',
+      run: async () => (await import('./session.js')).runSessionStart(),
+    },
+    'claude-session-end': {
+      usage: 'claude-session-end             claude: plugin SessionEnd hook, releases binding on exit',
+      run: async () => (await import('./session.js')).runSessionEnd(),
     },
     monitor: {
       usage: 'monitor                        claude: plugin monitor, one line per message for this session',

@@ -11,6 +11,10 @@ const PRUNE_QUEUED_AFTER_MS = 7 * 24 * 3600_000
 /** The bridge's own notices use this sender, so no peer may send as it, claim it or listen on it. */
 const RESERVED = `"${BRIDGE_SENDER}" is reserved for notices from the bridge itself. Pick another name.`
 const PERSIST_SEEN_MS = 3600_000
+/** Minimum gap between on-demand push-endpoint liveness sweeps. */
+const PROBE_COOLDOWN_MS = 3_000
+/** Short pause before retrying a failed liveness probe so a transient stall does not drop direct delivery. */
+const PROBE_RETRY_DELAY_MS = 100
 /** At most this many messages from the network wait per local peer. More are left with the sender's host. */
 export const REMOTE_QUEUE_CAP = 50
 
@@ -86,10 +90,14 @@ export interface HubDeps {
   /** Pushes one message through an adapter's endpoint. Resolves once delivered. */
   deliver?: (kind: PeerKind, endpoint: Record<string, string>, msg: Message) => Promise<void>
   /**
-   * The kind's check that an endpoint still reaches its session, or undefined. A kind with one holds no
-   * credential in its endpoints, so they are saved, and checked before they are restored after a restart.
+   * The kind's check that an endpoint still reaches its session, or undefined.
    */
   probe?: (kind: PeerKind) => ((endpoint: Record<string, string>) => Promise<boolean>) | undefined
+  /**
+   * True when the kind's endpoints hold no credential and are safe to persist to disk.
+   * Defaults to `false` when omitted so credential-bearing endpoints are never written by mistake.
+   */
+  persistEndpoint?: (kind: PeerKind) => boolean
   /** Told when the set of shared peers or their online state may have changed, so the link can publish it. */
   net?: { changed(): void }
 }
@@ -107,6 +115,8 @@ function redact(p: PeerStatus): PeerStatus {
 class PushConn implements Conn {
   closed = false
   readonly async = true
+  /** Last time this endpoint was registered, delivered to, or passed a liveness probe. */
+  lastVerifiedAt: number
   constructor(
     private readonly hub: Hub,
     private readonly deliver: NonNullable<HubDeps['deliver']>,
@@ -117,7 +127,9 @@ class PushConn implements Conn {
     /** Saved to disk, so it is restored after a daemon restart. */
     readonly saved: boolean,
     private readonly onDrop: (conn: PushConn, why: string) => void,
-  ) {}
+  ) {
+    this.lastVerifiedAt = now().getTime()
+  }
 
   send(reply: Reply): void {
     if (reply.type !== 'msg') {
@@ -126,7 +138,10 @@ class PushConn implements Conn {
     }
     const msg = reply.msg
     this.deliver(this.kind, this.endpoint, msg).then(
-      () => this.hub.handle({ op: 'ack', as: msg.to, id: msg.id }, this),
+      () => {
+        this.lastVerifiedAt = this.now().getTime()
+        this.hub.handle({ op: 'ack', as: msg.to, id: msg.id }, this)
+      },
       (err: unknown) => this.onDrop(this, toError(err).message),
     )
   }
@@ -191,6 +206,7 @@ export class Hub {
   /** Outbox key to the id handed to the link and not yet acked. */
   private readonly remoteInflight = new Map<string, string>()
   private net: NetView | undefined
+  private probing: Promise<number> | undefined
 
   constructor(private readonly deps: HubDeps) {
     const { peers, queues, endpoints } = deps.store.load()
@@ -231,7 +247,8 @@ export class Hub {
         return refused ? this.fail(conn, refused) : this.reply(conn, { type: 'ok' })
       }
       case 'leave':
-        this.leave(req.as)
+        if (req.as !== undefined) this.leave(req.as)
+        else if (req.session !== undefined) this.leaveBySession(req.session)
         return this.reply(conn, { type: 'ok' })
       case 'share': {
         const refused = this.share(req.as, req.sessions, req.on)
@@ -397,7 +414,7 @@ export class Hub {
   private push(kind: PeerKind, session: string, endpoint: Record<string, string>, deliver: NonNullable<HubDeps['deliver']>, write: boolean): string | undefined {
     const old = this.pushers.get(session)
     if (old) this.dropPusher(old, false)
-    const saved = this.deps.probe?.(kind) !== undefined
+    const saved = Boolean(this.deps.persistEndpoint?.(kind))
     let refused: string | undefined
     const conn = new PushConn(this, deliver, kind, this.deps.now, session, endpoint, saved, (c, why) => {
       refused ??= why
@@ -751,6 +768,60 @@ export class Hub {
       this.queues.set(p.name, kept)
       this.deps.store.saveQueue(p.name, kept)
     }
+  }
+
+  hasPushers(): boolean {
+    return this.pushers.size > 0
+  }
+
+  /**
+   * Probes registered push endpoints in parallel and drops any whose session is gone.
+   * Skips endpoints verified within PROBE_COOLDOWN_MS unless `force` is true, and deduplicates concurrent sweeps.
+   */
+  async probePushers(force = false): Promise<number> {
+    if (!this.pushers.size || !this.deps.probe) return 0
+    if (this.probing) return this.probing
+    const now = this.deps.now().getTime()
+    const due = [...this.pushers.entries()].filter(([, conn]) => force || now - conn.lastVerifiedAt >= PROBE_COOLDOWN_MS)
+    if (!due.length) return 0
+    const run = (async (): Promise<number> => {
+      const checks = await Promise.all(
+        due.map(async ([session, conn]) => {
+          const probe = this.deps.probe?.(conn.kind)
+          if (!probe) return { session, conn, ok: true }
+          // Retry once after a short pause so a transient stall does not drop direct delivery.
+          let ok = await probe(conn.endpoint).catch(() => false)
+          if (!ok) {
+            await new Promise(r => setTimeout(r, PROBE_RETRY_DELAY_MS))
+            ok = await probe(conn.endpoint).catch(() => false)
+          }
+          return { session, conn, ok }
+        }),
+      )
+      const doneAt = this.deps.now().getTime()
+      let dropped = 0
+      for (const { session, conn, ok } of checks) {
+        if (this.pushers.get(session) !== conn) continue
+        if (ok) {
+          conn.lastVerifiedAt = doneAt
+          continue
+        }
+        this.deps.log?.(`push endpoint for session ${sessionTag(session)} is gone: dropped.`)
+        this.dropPusher(conn)
+        dropped++
+      }
+      return dropped
+    })().finally(() => {
+      this.probing = undefined
+    })
+    this.probing = run
+    return run
+  }
+
+  private leaveBySession(session: string): void {
+    const pusher = this.pushers.get(session)
+    if (pusher) this.dropPusher(pusher)
+    for (const p of this.boundTo(session)) this.leave(p.name)
   }
 
   private leave(name: string): void {

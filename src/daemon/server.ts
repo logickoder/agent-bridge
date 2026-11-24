@@ -14,6 +14,8 @@ import { fileStore } from './store.js'
 import { onLines, writeLine } from '../lib/wire.js'
 
 const log = logger('daemon', { timestamps: true })
+/** Slow background liveness sweep so remote network members see offline presence without local `peers` calls. */
+const PROBE_INTERVAL_MS = 45_000
 
 function socketConn(sock: net.Socket): Conn {
   return {
@@ -37,6 +39,7 @@ export function runDaemon(): void {
     log,
     net: { changed: () => netService?.changed() },
     probe: kind => ADAPTERS[kind].alive,
+    persistEndpoint: kind => Boolean(ADAPTERS[kind].persistEndpoint),
     deliver: async (kind, endpoint, msg) => {
       const deliver = ADAPTERS[kind].deliver
       if (!deliver) throw new Error(`${kind} has no push delivery.`)
@@ -92,7 +95,12 @@ export function runDaemon(): void {
             )
             .finally(() => conn.end())
         }
-        hub.handle(parsed.data, conn)
+        const req = parsed.data
+        // Sweep in the background: the reply must not wait on a dead endpoint's timeout. The next call sees the result.
+        if (req.op === 'status' || (req.op === 'send' && req.toKind !== undefined)) {
+          hub.probePushers().catch((err: unknown) => log(`probe failed: ${toError(err).message}`))
+        }
+        hub.handle(req, conn)
       },
       line => log(`unparseable line: ${line.slice(0, 200)}`),
     )
@@ -108,6 +116,9 @@ export function runDaemon(): void {
     fs.chmodSync(SOCK, 0o600)
     log(`listening on ${SOCK} pid=${process.pid}`)
   })
+  setInterval(() => {
+    if (hub.hasPushers()) void hub.probePushers(true)
+  }, PROBE_INTERVAL_MS).unref()
   process.on('SIGINT', exit)
   process.on('SIGTERM', exit)
 }

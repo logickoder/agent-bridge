@@ -48,7 +48,16 @@ type Deliver = NonNullable<ConstructorParameters<typeof Hub>[0]['deliver']>
 function setup(store = memoryStore(), log: (msg: string) => void = () => {}, deliver?: Deliver, alive: (endpoint: Record<string, string>) => Promise<boolean> = async () => true) {
   let n = 0
   const clock = { now: new Date('2026-11-02T00:00:00Z') }
-  const hub = new Hub({ store, now: () => clock.now, newId: () => `m${++n}`, pid: 1, log, ...(deliver ? { deliver } : {}), probe: kind => (kind === 'claude' ? alive : undefined) })
+  const hub = new Hub({
+    store,
+    now: () => clock.now,
+    newId: () => `m${++n}`,
+    pid: 1,
+    log,
+    ...(deliver ? { deliver } : {}),
+    probe: kind => (kind === 'claude' ? alive : undefined),
+    persistEndpoint: kind => kind === 'claude',
+  })
   const call = (req: Exclude<Request, { op: 'shutdown' | 'net' }>, conn = new FakeConn()): FakeConn => {
     hub.handle(req, conn)
     return conn
@@ -903,5 +912,90 @@ describe('send by kind', () => {
     expect(call({ op: 'send', from: 'shell', toKind: 'claude', folder: '/p/app', text: 'x' }).last()).toMatchObject({
       message: expect.stringMatching(/2 online claude peers in this folder: a, b/),
     })
+  })
+})
+
+describe('leave by session and push liveness', () => {
+  it('unbinds a peer by session id, even after rename', () => {
+    const { call, listen, hub } = setup()
+    call({ op: 'claim', kind: 'claude', session: 'c1', folder: '/p/app' })
+    call({ op: 'claim', kind: 'claude', session: 'c1', name: 'renamed', folder: '/p/app' })
+    listen('renamed', 'claude', 'c1')
+    expect(hub.status().find(p => p.name === 'renamed')?.online).toBe(true)
+    call({ op: 'leave', session: 'c1' })
+    const p = hub.status().find(p => p.name === 'renamed')
+    expect(p?.online).toBe(false)
+    expect(p?.session).toBeNull()
+  })
+
+  it('probePushers drops dead endpoints, keeps peer.session, respects cooldown, and honors persistEndpoint', async () => {
+    let ok = true
+    let probes = 0
+    const store = memoryStore()
+    let n = 0
+    const clock = { now: new Date('2026-11-02T00:00:00Z') }
+    const hub = new Hub({
+      store,
+      now: () => clock.now,
+      newId: () => `m${++n}`,
+      pid: 1,
+      deliver: async () => {},
+      probe: () => async () => {
+        probes++
+        return ok
+      },
+      persistEndpoint: kind => kind === 'claude',
+    })
+    const call = (req: Exclude<Request, { op: 'shutdown' | 'net' }>) => {
+      const c = new FakeConn()
+      hub.handle(req, c)
+      return c
+    }
+    call({ op: 'claim', kind: 'agy', session: 'a1', folder: '/p/app' })
+    call({ op: 'push', kind: 'agy', session: 'a1', endpoint: { address: 'localhost:1234', token: 'secret' } })
+    // agy endpoint is probed, never saved to disk.
+    expect(store.endpoints).toEqual([])
+    expect(hub.status().find(p => p.name === 'app-agy')?.online).toBe(true)
+
+    // Freshly registered endpoint skips probing within 3s cooldown.
+    expect(await hub.probePushers()).toBe(0)
+    expect(probes).toBe(0)
+
+    clock.now = new Date(clock.now.getTime() + 4000)
+    expect(await hub.probePushers()).toBe(0)
+    expect(probes).toBe(1)
+    // Within 3s of the last successful probe: skipped.
+    expect(await hub.probePushers()).toBe(0)
+    expect(probes).toBe(1)
+
+    // A single transient failure followed by success keeps the endpoint alive.
+    let calls = 0
+    ok = true
+    const store2 = memoryStore()
+    const hub2 = new Hub({
+      store: store2,
+      now: () => clock.now,
+      newId: () => `m${++n}`,
+      pid: 1,
+      deliver: async () => {},
+      probe: () => async () => ++calls > 1,
+    })
+    hub2.handle({ op: 'claim', kind: 'agy', session: 'a2', folder: '/p/app' }, new FakeConn())
+    hub2.handle({ op: 'push', kind: 'agy', session: 'a2', endpoint: { address: 'localhost:1234', token: 'secret' } }, new FakeConn())
+    // Without persistEndpoint, endpoints are never saved to disk even when probe is provided.
+    expect(store2.endpoints).toEqual([])
+    clock.now = new Date(clock.now.getTime() + 4000)
+    expect(await hub2.probePushers()).toBe(0)
+    expect(calls).toBe(2)
+    expect(hub2.status().find(p => p.name === 'app-agy')?.online).toBe(true)
+
+    ok = false
+    clock.now = new Date(clock.now.getTime() + 4000)
+    expect(await hub.probePushers()).toBe(1)
+    expect(probes).toBe(3)
+    const after = hub.status().find(p => p.name === 'app-agy')
+    expect(after?.online).toBe(false)
+    // Session stays bound so `agy --continue` can still drain queued mail and trigger REJOIN.
+    expect(after?.session).toBe('a1')
   })
 })

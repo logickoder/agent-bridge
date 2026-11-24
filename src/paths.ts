@@ -7,6 +7,8 @@ export const HOME = process.env['AGENT_BRIDGE_HOME'] ?? path.join(os.homedir(), 
 export const SOCK = path.join(HOME, 'bridge.sock')
 export const QUEUE_DIR = path.join(HOME, 'queue')
 export const PEERS_FILE = path.join(HOME, 'peers.json')
+/** User preferences (auto-join mode and folders). */
+export const CONFIG_FILE = path.join(HOME, 'config.json')
 export const DAEMON_LOG = path.join(HOME, 'daemon.log')
 export const DAEMON_LOCK = path.join(HOME, 'daemon.lock')
 /** Push endpoints that hold no credential (Claude's inbox socket path), restored on daemon start. */

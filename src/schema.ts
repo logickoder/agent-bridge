@@ -87,6 +87,17 @@ export const Peer = z.object({
 /** A push endpoint saved to disk so it survives a daemon restart. Only endpoints with no credential are saved. */
 export const SavedEndpoint = z.object({ session: z.string().min(1), kind: PeerKind, endpoint: z.record(z.string(), z.string()) })
 
+/** Opt-in auto-join settings. Off by default. */
+export const AutoJoinConfig = z.object({
+  enabled: z.boolean().default(false),
+  ignore: z.array(z.string().min(1)).default([]),
+})
+
+/** User settings saved in `~/.agent-bridge/config.json`. */
+export const BridgeConfig = z.object({
+  autoJoin: AutoJoinConfig.default({ enabled: false, ignore: [] }),
+})
+
 /** `agent-bridge net <sub>`, as sent to the daemon. */
 export const NetCommand = z.discriminatedUnion('cmd', [
   /**
@@ -169,7 +180,10 @@ export const Request = z.discriminatedUnion('op', [
   z.object({ op: z.literal('ack'), as: PeerName, id: z.string() }),
   z.object({ op: z.literal('drain'), session: z.string().min(1) }),
   z.object({ op: z.literal('ack-drained'), session: z.string().min(1), ids: z.array(z.string()) }),
-  z.object({ op: z.literal('leave'), as: PeerName }),
+  z.object({ op: z.literal('leave'), as: PeerName.optional(), session: z.string().min(1).optional() }).refine(
+    r => (r.as === undefined) !== (r.session === undefined),
+    'leave needs exactly one of `as` or `session`.',
+  ),
   /**
    * Register a way to push messages into the session itself, e.g. agy's `agentapi send-message`. The endpoint
    * is adapter-defined and may hold a credential, so the daemon never shows it. It keeps it in memory only,
@@ -279,6 +293,8 @@ export type PeerKind = z.infer<typeof PeerKind>
 export type Message = z.infer<typeof Message>
 export type Peer = z.infer<typeof Peer>
 export type SavedEndpoint = z.infer<typeof SavedEndpoint>
+export type AutoJoinConfig = z.infer<typeof AutoJoinConfig>
+export type BridgeConfig = z.infer<typeof BridgeConfig>
 export type PeerStatus = z.infer<typeof PeerStatus>
 export type RemotePeer = z.infer<typeof RemotePeer>
 export type NetworkStatus = z.infer<typeof NetworkStatus>

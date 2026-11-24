@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { DEFAULT_CONFIG, ignoreAutoJoinFolder } from '../../config.js'
 import type { Message } from '../../schema.js'
-import { hookOutput, type Drained } from './hook.js'
+import { hookOutput, sessionStartOutput, type Drained } from './hook.js'
 
 const msg = (id: string): Message => ({ id, from: 'claude', to: 'agy', text: `text ${id}`, ts: '2026-11-02T00:00:00.000Z' })
 const drained = (msgs: Message[], rejoin = false): Drained => ({ msgs, rejoin, ack: vi.fn(async () => {}) })
@@ -49,5 +50,26 @@ describe('hookOutput', () => {
   it('adds the rejoin line after queued messages', async () => {
     const r = await hookOutput('{"conversationId":"c1"}', async () => drained([msg('m1')], true))
     expect(JSON.stringify(r.out)).toMatch(/text m1[\s\S]*agent-bridge join --kind agy/)
+  })
+})
+
+describe('sessionStartOutput', () => {
+  const onCfg = { autoJoin: { enabled: true, ignore: [] } }
+
+  it('returns {} when off, ignored, missing conversationId, or already online', async () => {
+    const isOnline = vi.fn(async () => false)
+    expect(await sessionStartOutput('{"conversationId":"c1","cwd":"/p/app"}', { config: () => DEFAULT_CONFIG, isOnline })).toEqual({})
+    expect(await sessionStartOutput('{"conversationId":"c1","cwd":"/p/app"}', { config: () => ignoreAutoJoinFolder(onCfg, '/p/app'), isOnline })).toEqual({})
+    expect(await sessionStartOutput('{"cwd":"/p/app"}', { config: () => onCfg, isOnline })).toEqual({})
+    expect(await sessionStartOutput('{"conversationId":"c1","cwd":"/p/app"}', { config: () => onCfg, isOnline: async () => true })).toEqual({})
+    expect(isOnline).not.toHaveBeenCalled()
+  })
+
+  it('injects the auto-join instruction when enabled for the folder', async () => {
+    const out = await sessionStartOutput('{"conversationId":"c1","workspacePaths":["/p/app"]}', {
+      config: () => onCfg,
+      isOnline: async () => false,
+    })
+    expect(out).toEqual({ injectSteps: [{ userMessage: expect.stringMatching(/agent-bridge join --kind agy/) }] })
   })
 })
