@@ -1,6 +1,6 @@
 {
   "name": "@logickoder/agent-bridge",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Live messaging between agent CLI sessions (Claude Code, Antigravity, opencode). Each message wakes the receiving session in place.",
   "author": {
     "name": "Jeffery Orazulike",
@@ -16,7 +16,9 @@
   },
   "packageManager": "pnpm@12.16.1",
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli.js",
+    "sync-version": "node scripts/sync-version.mjs",
+    "prepare": "pnpm sync-version",
+    "build": "pnpm sync-version && rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --dir src",
     "test:e2e": "pnpm build && vitest run --dir test",
