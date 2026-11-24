@@ -99,6 +99,7 @@ jobs:
           path: |
             dist
             package.json
+            src/adapters/claude/plugin/.claude-plugin/plugin.json
           if-no-files-found: error
           retention-days: 1
 
@@ -133,7 +134,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json
+          git add package.json src/adapters/claude/plugin/.claude-plugin/plugin.json
           git commit -m "chore(release): $VERSION [skip ci]"
           git push origin HEAD:main
 
