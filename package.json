@@ -16,7 +16,8 @@
   },
   "packageManager": "pnpm@12.16.1",
   "scripts": {
-    "sync-version": "node -e \"const fs=require('fs'),p='src/adapters/claude/plugin/.claude-plugin/plugin.json',v=JSON.parse(fs.readFileSync('package.json','utf8')).version,j=JSON.parse(fs.readFileSync(p,'utf8'));if(j.version!==v){j.version=v;fs.writeFileSync(p,JSON.stringify(j,null,2)+'\\n')}\"",
+    "sync-version": "node scripts/sync-version.mjs",
+    "prepare": "pnpm sync-version",
     "build": "pnpm sync-version && rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --dir src",
